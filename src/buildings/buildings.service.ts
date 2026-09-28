@@ -1,0 +1,19 @@
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { AuthUser } from '../common/auth.types';
+import { PrismaService } from '../database/prisma.service';
+import { TenantAccessService } from '../common/tenant-access.service';
+import { CreateBuildingDto, UpdateBuildingDto } from './dto';
+import { pageMeta } from '../common/pagination';
+@Injectable()
+export class BuildingsService {
+  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService) {}
+  async list(user: AuthUser, page: number, limit: number) { const where = { deletedAt: null, ...(user.role === UserRole.ADMIN ? {} : { tenantId: user.tenantId! }) }; const [items, total] = await this.prisma.$transaction([this.prisma.building.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }), this.prisma.building.count({ where })]); return { items, pagination: pageMeta(page, limit, total) }; }
+  async create(user: AuthUser, dto: CreateBuildingDto) { const tenantId = user.role === UserRole.ADMIN ? dto.tenantId : user.tenantId; if (!tenantId) throw new ForbiddenException({ code: 'TENANT_REQUIRED', message: 'tenantId is required for Admin' }); if (user.role !== UserRole.ADMIN && user.role !== UserRole.BUILDING_OWNER) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Only owners or admins can create buildings' }); return this.prisma.building.create({ data: { tenantId, name: dto.name.trim(), address: dto.address?.trim() } }); }
+  async find(user: AuthUser, id: string) { return this.access.building(user, id); }
+  async update(user: AuthUser, id: string, dto: UpdateBuildingDto) { await this.access.building(user, id); if (user.role === UserRole.BUILDING_MANAGER && dto.status) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Managers cannot change building status' }); return this.prisma.building.update({ where: { id }, data: dto }); }
+  async remove(user: AuthUser, id: string) { await this.access.building(user, id); if (user.role !== UserRole.ADMIN && user.role !== UserRole.BUILDING_OWNER) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Only owners or admins can delete buildings' }); return this.prisma.building.update({ where: { id }, data: { deletedAt: new Date() } }); }
+  async assignManager(user: AuthUser, buildingId: string, managerId: string) { const building = await this.access.building(user, buildingId); if (user.role !== UserRole.ADMIN && user.role !== UserRole.BUILDING_OWNER) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Only owners or admins can assign managers' }); const manager = await this.prisma.user.findFirst({ where: { id: managerId, role: UserRole.BUILDING_MANAGER, deletedAt: null } }); if (!manager) throw new NotFoundException({ code: 'MANAGER_NOT_FOUND', message: 'Building manager not found' }); if (manager.tenantId !== building.tenantId) throw new ForbiddenException({ code: 'TENANT_ACCESS_DENIED', message: 'Manager must belong to the same tenant' }); return this.prisma.staffAssignment.upsert({ where: { userId_buildingId: { userId: managerId, buildingId } }, update: {}, create: { userId: managerId, buildingId } }); }
+  async revokeManager(user: AuthUser, buildingId: string, managerId: string) { await this.assignManagerAccess(user, buildingId); return this.prisma.staffAssignment.delete({ where: { userId_buildingId: { userId: managerId, buildingId } } }); }
+  private async assignManagerAccess(user: AuthUser, buildingId: string) { await this.access.building(user, buildingId); if (user.role !== UserRole.ADMIN && user.role !== UserRole.BUILDING_OWNER) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Only owners or admins can manage assignments' }); }
+}
