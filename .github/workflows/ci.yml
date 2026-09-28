@@ -1,0 +1,31 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: spotway
+          POSTGRES_PASSWORD: spotway
+          POSTGRES_DB: spotway
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U spotway -d spotway" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://spotway:spotway@localhost:5432/spotway?schema=public
+      JWT_ACCESS_SECRET: test-access-secret-at-least-32-characters
+      JWT_REFRESH_SECRET: test-refresh-secret-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma:generate
+      - run: pnpm prisma migrate deploy
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
