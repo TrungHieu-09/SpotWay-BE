@@ -1,0 +1,234 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  BUILDING_OWNER
+  BUILDING_MANAGER
+  STORE_OWNER
+  GUEST
+}
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+enum ServicePackage {
+  FREE
+  PRO
+  ENTERPRISE
+}
+enum BuildingStatus {
+  ACTIVE
+  INACTIVE
+}
+enum FloorPublishStatus {
+  DRAFT
+  PUBLISHED
+}
+enum StoreStatus {
+  PENDING
+  ACTIVE
+  CLOSED
+}
+enum NodeType {
+  NORMAL
+  DOOR
+  ELEVATOR
+  JUNCTION
+}
+enum EdgeStatus {
+  ACTIVE
+  BLOCKED
+}
+enum PoiCategory {
+  RESTROOM
+  ELEVATOR
+  EXIT
+  INFO
+  PARKING
+  CUSTOM
+}
+
+model Tenant {
+  id String @id @default(uuid())
+  name String
+  subdomain String @unique
+  servicePackage ServicePackage @default(FREE)
+  status TenantStatus @default(ACTIVE)
+  archived Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  users User[]
+  buildings Building[]
+  @@map("tenants")
+}
+
+model User {
+  id String @id @default(uuid())
+  tenantId String? @map("tenant_id")
+  email String @unique
+  passwordHash String? @map("password_hash")
+  googleId String? @unique @map("google_id")
+  role UserRole @default(GUEST)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  sessions RefreshSession[]
+  assignments StaffAssignment[]
+  stores Store[] @relation("StoreOwner")
+  @@index([tenantId, role])
+  @@map("users")
+}
+
+model RefreshSession {
+  id String @id @default(uuid())
+  userId String @map("user_id")
+  tokenHash String @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, expiresAt])
+  @@map("refresh_sessions")
+}
+
+model Building {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  name String
+  address String?
+  status BuildingStatus @default(ACTIVE)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  floors Floor[]
+  assignments StaffAssignment[]
+  elevatorLinks ElevatorLink[]
+  @@index([tenantId, deletedAt])
+  @@map("buildings")
+}
+
+model StaffAssignment {
+  id String @id @default(uuid())
+  userId String @map("user_id")
+  buildingId String @map("building_id")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  building Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  @@unique([userId, buildingId])
+  @@map("staff_assignments")
+}
+
+model Floor {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  buildingId String @map("building_id")
+  floorNumber Int @map("floor_number")
+  name String
+  mapImageUrl String? @map("map_image_url")
+  mapWidth Int? @map("map_width")
+  mapHeight Int? @map("map_height")
+  publishStatus FloorPublishStatus @default(DRAFT) @map("publish_status")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  building Building @relation(fields: [buildingId], references: [id])
+  nodes Node[]
+  edges Edge[]
+  pois Poi[]
+  stores Store[]
+  @@unique([buildingId, floorNumber])
+  @@index([tenantId, buildingId, deletedAt])
+  @@map("floors")
+}
+
+model Node {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  floorId String @map("floor_id")
+  x Float
+  y Float
+  type NodeType @default(NORMAL)
+  accessible Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  floor Floor @relation(fields: [floorId], references: [id])
+  pois Poi[]
+  stores Store[]
+  @@index([tenantId, floorId, deletedAt])
+  @@map("nodes")
+}
+
+model Edge {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  floorId String @map("floor_id")
+  fromNodeId String @map("from_node_id")
+  toNodeId String @map("to_node_id")
+  weight Float
+  accessible Boolean @default(true)
+  status EdgeStatus @default(ACTIVE)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  floor Floor @relation(fields: [floorId], references: [id])
+  @@index([tenantId, floorId, deletedAt])
+  @@map("edges")
+}
+
+model Poi {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  floorId String @map("floor_id")
+  nodeId String @map("node_id")
+  name String
+  category PoiCategory
+  icon String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  floor Floor @relation(fields: [floorId], references: [id])
+  node Node @relation(fields: [nodeId], references: [id])
+  @@index([tenantId, floorId, deletedAt])
+  @@map("pois")
+}
+
+model Store {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  floorId String @map("floor_id")
+  nodeId String? @map("node_id")
+  ownerId String? @map("owner_id")
+  name String
+  logoUrl String? @map("logo_url")
+  images String[]
+  description String?
+  status StoreStatus @default(PENDING)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  floor Floor @relation(fields: [floorId], references: [id])
+  node Node? @relation(fields: [nodeId], references: [id])
+  owner User? @relation("StoreOwner", fields: [ownerId], references: [id])
+  @@index([tenantId, floorId, deletedAt])
+  @@map("stores")
+}
+
+model ElevatorLink {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  buildingId String @map("building_id")
+  nodeIdFrom String @map("node_id_from")
+  nodeIdTo String @map("node_id_to")
+  createdAt DateTime @default(now()) @map("created_at")
+  building Building @relation(fields: [buildingId], references: [id])
+  @@map("elevator_links")
+}
