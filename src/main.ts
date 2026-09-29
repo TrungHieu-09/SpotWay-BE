@@ -15,8 +15,22 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new ApiExceptionFilter());
-  const config = new DocumentBuilder().setTitle('SpotWay API').setVersion('1.0').addBearerAuth().build();
-  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, config));
+  const config = new DocumentBuilder()
+    .setTitle('SpotWay API')
+    .setDescription('API documentation for SpotWay Backend')
+    .setVersion('1.0.0')
+    .addServer('http://localhost:3000', 'Development')
+    .addServer(process.env.API_PRODUCTION_URL ?? 'https://api.example.com', 'Production')
+    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'bearerAuth')
+    .addTag('System', 'System health and service status')
+    .addTag('Authentication', 'Registration, JWT sessions, and Google OAuth')
+    .addTag('Buildings', 'Building and manager assignment APIs')
+    .addTag('Floors', 'Floor management and publishing APIs')
+    .addTag('Stores', 'Tenant-scoped store management APIs')
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  document.openapi = '3.0.3';
+  SwaggerModule.setup('api/docs', app, document);
   await app.listen(Number(process.env.PORT ?? 3000));
 }
 bootstrap();
