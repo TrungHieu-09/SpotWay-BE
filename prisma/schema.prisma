@@ -81,6 +81,7 @@ model User {
   deletedAt DateTime? @map("deleted_at")
   tenant Tenant? @relation(fields: [tenantId], references: [id])
   sessions RefreshSession[]
+  oauthCodes OAuthCode[]
   assignments StaffAssignment[]
   stores Store[] @relation("StoreOwner")
   @@index([tenantId, role])
@@ -97,6 +98,18 @@ model RefreshSession {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId, expiresAt])
   @@map("refresh_sessions")
+}
+
+model OAuthCode {
+  id String @id @default(uuid())
+  userId String @map("user_id")
+  codeHash String @unique @map("code_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([expiresAt, usedAt])
+  @@map("oauth_codes")
 }
 
 model Building {
