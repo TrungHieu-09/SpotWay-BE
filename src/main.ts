@@ -27,6 +27,7 @@ async function bootstrap() {
     .addTag('Buildings', 'Building and manager assignment APIs')
     .addTag('Floors', 'Floor management and publishing APIs')
     .addTag('Stores', 'Tenant-scoped store management APIs')
+    .addTag('Map Editor', 'Tenant-scoped Node, Edge, POI, and elevator-link APIs')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   document.openapi = '3.0.3';
