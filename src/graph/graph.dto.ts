@@ -40,3 +40,46 @@ export class CreateElevatorLinkDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() nodeIdFrom!: string;
   @ApiProperty({ format: 'uuid' }) @IsUUID() nodeIdTo!: string;
 }
+
+export class NodeResponse {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) tenantId!: string;
+  @ApiProperty({ format: 'uuid' }) floorId!: string;
+  @ApiProperty({ example: 240.5 }) x!: number;
+  @ApiProperty({ example: 120.25 }) y!: number;
+  @ApiProperty({ enum: NodeType }) type!: NodeType;
+  @ApiProperty({ example: true }) accessible!: boolean;
+  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
+  @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
+}
+
+export class EdgeResponse {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) floorId!: string;
+  @ApiProperty({ format: 'uuid' }) fromNodeId!: string;
+  @ApiProperty({ format: 'uuid' }) toNodeId!: string;
+  @ApiProperty({ example: 120.42 }) weight!: number;
+  @ApiProperty({ example: true }) accessible!: boolean;
+  @ApiProperty({ enum: EdgeStatus }) status!: EdgeStatus;
+  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
+  @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
+}
+
+export class PoiResponse {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) floorId!: string;
+  @ApiProperty({ format: 'uuid' }) nodeId!: string;
+  @ApiProperty({ example: 'North restroom' }) name!: string;
+  @ApiProperty({ enum: PoiCategory }) category!: PoiCategory;
+  @ApiPropertyOptional({ example: 'restroom', nullable: true }) icon!: string | null;
+  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
+  @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
+}
+
+export class ElevatorLinkResponse {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) buildingId!: string;
+  @ApiProperty({ format: 'uuid' }) nodeIdFrom!: string;
+  @ApiProperty({ format: 'uuid' }) nodeIdTo!: string;
+  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
+}
