@@ -19,9 +19,9 @@ async function main() {
     ['00000000-0000-4000-8000-000000000202', first.id, 300, 100, NodeType.ELEVATOR],
   ] as const;
   for (const [id, floorId, x, y, type] of nodeData) await prisma.node.upsert({ where: { id }, update: {}, create: { id, tenantId: tenant.id, floorId, x, y, type } });
-  await prisma.edge.upsert({ where: { id: '00000000-0000-4000-8000-000000000301' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000301', tenantId: tenant.id, floorId: ground.id, fromNodeId: nodeData[0][0], toNodeId: nodeData[1][0], weight: 200 } });
-  await prisma.edge.upsert({ where: { id: '00000000-0000-4000-8000-000000000302' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000302', tenantId: tenant.id, floorId: first.id, fromNodeId: nodeData[2][0], toNodeId: nodeData[3][0], weight: 200 } });
-  await prisma.elevatorLink.upsert({ where: { id: '00000000-0000-4000-8000-000000000401' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000401', tenantId: tenant.id, buildingId: building.id, nodeIdFrom: nodeData[1][0], nodeIdTo: nodeData[3][0] } });
+  await prisma.edge.upsert({ where: { id: '00000000-0000-4000-8000-000000000301' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000301', tenantId: tenant.id, floorId: ground.id, fromNodeId: nodeData[0][0], toNodeId: nodeData[1][0], nodeLowId: nodeData[0][0], nodeHighId: nodeData[1][0], weight: 200 } });
+  await prisma.edge.upsert({ where: { id: '00000000-0000-4000-8000-000000000302' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000302', tenantId: tenant.id, floorId: first.id, fromNodeId: nodeData[2][0], toNodeId: nodeData[3][0], nodeLowId: nodeData[2][0], nodeHighId: nodeData[3][0], weight: 200 } });
+  await prisma.elevatorLink.upsert({ where: { id: '00000000-0000-4000-8000-000000000401' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000401', tenantId: tenant.id, buildingId: building.id, nodeIdFrom: nodeData[1][0], nodeIdTo: nodeData[3][0], nodeLowId: nodeData[1][0], nodeHighId: nodeData[3][0] } });
   await prisma.store.upsert({ where: { id: '00000000-0000-4000-8000-000000000501' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000501', tenantId: tenant.id, floorId: ground.id, nodeId: nodeData[0][0], ownerId: storeOwner.id, name: 'Demo Store', images: [], status: StoreStatus.ACTIVE } });
   console.log({ admin: admin.email, owner: owner.email, manager: manager.email, storeOwner: storeOwner.email, password: 'ChangeMe123!' });
 }

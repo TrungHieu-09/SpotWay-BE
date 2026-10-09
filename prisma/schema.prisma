@@ -186,6 +186,8 @@ model Edge {
   floorId String @map("floor_id")
   fromNodeId String @map("from_node_id")
   toNodeId String @map("to_node_id")
+  nodeLowId String @map("node_low_id")
+  nodeHighId String @map("node_high_id")
   weight Float
   accessible Boolean @default(true)
   status EdgeStatus @default(ACTIVE)
@@ -194,6 +196,7 @@ model Edge {
   deletedAt DateTime? @map("deleted_at")
   floor Floor @relation(fields: [floorId], references: [id])
   @@index([tenantId, floorId, deletedAt])
+  @@index([floorId, nodeLowId, nodeHighId])
   @@map("edges")
 }
 
@@ -241,7 +244,11 @@ model ElevatorLink {
   buildingId String @map("building_id")
   nodeIdFrom String @map("node_id_from")
   nodeIdTo String @map("node_id_to")
+  nodeLowId String @map("node_low_id")
+  nodeHighId String @map("node_high_id")
   createdAt DateTime @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
   building Building @relation(fields: [buildingId], references: [id])
+  @@index([buildingId, nodeLowId, nodeHighId])
   @@map("elevator_links")
 }
