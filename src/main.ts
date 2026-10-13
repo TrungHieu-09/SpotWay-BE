@@ -29,6 +29,10 @@ async function bootstrap() {
     .addTag('Stores', 'Tenant-scoped store management APIs')
     .addTag('Map Editor', 'Tenant-scoped Node, Edge, POI, and elevator-link APIs')
     .addTag('Public Navigation', 'Published maps, destination search, and Guest route calculation')
+    .addTag('Analytics', 'Tenant-scoped navigation analytics')
+    .addTag('Promotions', 'Store promotion management and public visibility')
+    .addTag('QR Positioning', 'Opaque QR anchors for indoor position resolution')
+    .addTag('Tenants', 'Admin tenant and Building Owner management')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   document.openapi = '3.0.3';
