@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { BuildingStatus, EdgeStatus, FloorPublishStatus, StoreStatus, TenantStatus } from '@prisma/client';
 import { pageMeta } from '../common/pagination';
 import { PrismaService } from '../database/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { CreateRouteDto, PublicSearchQuery } from './navigation.dto';
 
 type GraphEdge = { to: string; weight: number; kind: 'WALK' | 'ELEVATOR' };
@@ -35,7 +36,7 @@ export function dijkstra(graph: Graph, source: string, target: string): Dijkstra
 
 @Injectable()
 export class NavigationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly analytics: AnalyticsService) {}
   private readonly elevatorWeight = Number(process.env.ELEVATOR_TRANSITION_WEIGHT ?? 20);
   private readonly unitsPerMeter = Number(process.env.MAP_UNITS_PER_METER ?? 1);
   private readonly walkingSpeed = Number(process.env.ROUTE_WALKING_SPEED_MPS ?? 1.2);
@@ -44,7 +45,7 @@ export class NavigationService {
   private async activeBuilding(id: string) { const building = await this.prisma.building.findFirst({ where: this.activeBuildingWhere(id) }); if (!building) throw new NotFoundException({ code: 'PUBLIC_BUILDING_NOT_FOUND', message: 'Published building not found' }); return building; }
   private async publishedFloors(buildingId: string) { return this.prisma.floor.findMany({ where: { buildingId, publishStatus: FloorPublishStatus.PUBLISHED, deletedAt: null }, orderBy: { floorNumber: 'asc' } }); }
 
-  async listFloors(buildingId: string) { await this.activeBuilding(buildingId); return this.publishedFloors(buildingId); }
+  async listFloors(buildingId: string) { const building = await this.activeBuilding(buildingId); const floors = await this.publishedFloors(buildingId); void this.analytics.enqueue({ eventType: 'MAP_VIEWED', tenantId: building.tenantId, buildingId }).catch(() => undefined); return floors; }
   async map(floorId: string) {
     const floor = await this.prisma.floor.findFirst({ where: { id: floorId, publishStatus: FloorPublishStatus.PUBLISHED, deletedAt: null, building: { is: { status: BuildingStatus.ACTIVE, deletedAt: null, tenant: { is: { status: TenantStatus.ACTIVE, archived: false, deletedAt: null } } } } } });
     if (!floor) throw new NotFoundException({ code: 'PUBLIC_FLOOR_NOT_FOUND', message: 'Published floor not found' });
@@ -54,6 +55,7 @@ export class NavigationService {
       this.prisma.poi.findMany({ where: { floorId, deletedAt: null }, orderBy: { createdAt: 'asc' } }),
       this.prisma.store.findMany({ where: { floorId, deletedAt: null, status: StoreStatus.ACTIVE }, orderBy: { name: 'asc' } }),
     ]);
+    void this.analytics.enqueue({ eventType: 'MAP_VIEWED', tenantId: floor.tenantId, buildingId: floor.buildingId, floorId }).catch(() => undefined);
     return { floor, nodes, edges, pois, stores };
   }
 
@@ -65,7 +67,7 @@ export class NavigationService {
       query.type === 'STORE' ? [] : this.prisma.poi.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, ...(nameFilter ? { name: nameFilter } : {}), node: { is: { deletedAt: null } } }, include: { node: true } }),
     ]);
     const items = [...stores.map((store) => ({ type: 'STORE' as const, id: store.id, name: store.name, floorId: store.floorId, nodeId: store.nodeId!, x: store.node!.x, y: store.node!.y })), ...pois.map((poi) => ({ type: 'POI' as const, id: poi.id, name: poi.name, floorId: poi.floorId, nodeId: poi.nodeId, x: poi.node.x, y: poi.node.y }))].sort((a, b) => a.name.localeCompare(b.name));
-    const total = items.length; return { items: items.slice((query.page - 1) * query.limit, query.page * query.limit), pagination: pageMeta(query.page, query.limit, total) };
+    const total = items.length; void this.analytics.enqueue({ eventType: 'SEARCH_PERFORMED', tenantId: floors[0].tenantId, buildingId, context: { query: term ?? null, resultCount: total, type: query.type ?? 'ALL' } }).catch(() => undefined); return { items: items.slice((query.page - 1) * query.limit, query.page * query.limit), pagination: pageMeta(query.page, query.limit, total) };
   }
 
   async route(dto: CreateRouteDto) {
@@ -88,9 +90,19 @@ export class NavigationService {
     const add = (from: string, edge: GraphEdge) => { const list = graph.get(from); if (list) list.push(edge); };
     for (const edge of edges) if (nodesById.has(edge.fromNodeId) && nodesById.has(edge.toNodeId)) { add(edge.fromNodeId, { to: edge.toNodeId, weight: edge.weight, kind: 'WALK' }); add(edge.toNodeId, { to: edge.fromNodeId, weight: edge.weight, kind: 'WALK' }); }
     for (const link of links) { const from = nodesById.get(link.nodeIdFrom); const to = nodesById.get(link.nodeIdTo); if (from && to && from.floorId !== to.floorId) { add(from.id, { to: to.id, weight: this.elevatorWeight, kind: 'ELEVATOR' }); add(to.id, { to: from.id, weight: this.elevatorWeight, kind: 'ELEVATOR' }); } }
-    const result = dijkstra(graph, source.id, target.id); if (!result) throw new NotFoundException({ code: 'NO_ROUTE_FOUND', message: 'No available route was found' });
+    void this.analytics.enqueue({ eventType: 'ROUTE_REQUESTED', tenantId: building.tenantId, buildingId: building.id, floorId: source.floorId, context: { fromNodeId: source.id, toStoreId: store.id, wheelchairMode: dto.wheelchairMode } }).catch(() => undefined);
+    const result = dijkstra(graph, source.id, target.id); if (!result) { void this.analytics.enqueue({ eventType: 'ROUTE_NOT_FOUND', tenantId: building.tenantId, buildingId: building.id, floorId: source.floorId, context: { fromNodeId: source.id, toStoreId: store.id, wheelchairMode: dto.wheelchairMode, routeStatus: 'NO_ROUTE' } }).catch(() => undefined); throw new NotFoundException({ code: 'NO_ROUTE_FOUND', message: 'No available route was found' }); }
     const distanceMeters = result.distance / this.unitsPerMeter;
     const steps = result.nodeIds.map((nodeId, index) => { const node = nodesById.get(nodeId)!; const edge = result.edges[index]; const next = edge ? nodesById.get(edge.to)! : undefined; const transition = edge?.kind === 'ELEVATOR' ? 'ELEVATOR' as const : undefined; const bearing = next && edge?.kind === 'WALK' ? (Math.atan2(next.y - node.y, next.x - node.x) * 180 / Math.PI + 360) % 360 : null; return { nodeId, floorId: node.floorId, x: node.x, y: node.y, bearing, ...(transition ? { transition, targetFloorId: next!.floorId, instruction: `Take the elevator to floor ${next!.floorId}` } : { instruction: next ? 'Continue to the next point' : 'You have arrived' }) }; });
-    return { totalDistance: distanceMeters, estimatedDurationSeconds: Math.max(1, Math.round(distanceMeters / this.walkingSpeed)), nodeIds: result.nodeIds, steps };
+    const response = { totalDistance: distanceMeters, estimatedDurationSeconds: Math.max(1, Math.round(distanceMeters / this.walkingSpeed)), nodeIds: result.nodeIds, steps };
+    void this.analytics.enqueue({ eventType: 'ROUTE_RESOLVED', tenantId: building.tenantId, buildingId: building.id, floorId: source.floorId, context: { fromNodeId: source.id, toStoreId: store.id, wheelchairMode: dto.wheelchairMode, routeStatus: 'RESOLVED', totalDistance: distanceMeters } }).catch(() => undefined);
+    return response;
+  }
+
+  async overview(buildingId: string) {
+    const building = await this.activeBuilding(buildingId); const floors = await this.publishedFloors(buildingId);
+    const links = await this.prisma.elevatorLink.findMany({ where: { buildingId, deletedAt: null }, select: { nodeIdFrom: true, nodeIdTo: true } });
+    const minFloor = floors.reduce((minimum, floor) => Math.min(minimum, floor.floorNumber), 0);
+    return { building: { id: building.id, defaultFloorHeight: building.defaultFloorHeight }, floors: floors.map((floor) => ({ id: floor.id, floorNumber: floor.floorNumber, name: floor.name, elevation: floor.elevation ?? (floor.floorNumber - minFloor) * building.defaultFloorHeight, mapImageUrl: floor.mapImageUrl, mapWidth: floor.mapWidth, mapHeight: floor.mapHeight })), verticalLinks: links.map((link) => ({ ...link, kind: 'ELEVATOR' })) };
   }
 }
