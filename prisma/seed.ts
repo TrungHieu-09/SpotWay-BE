@@ -10,8 +10,12 @@ async function main() {
   const storeOwner = await prisma.user.upsert({ where: { email: 'store-owner@demo-mall.local' }, update: {}, create: { email: 'store-owner@demo-mall.local', passwordHash, role: UserRole.STORE_OWNER, tenantId: tenant.id } });
   const building = await prisma.building.upsert({ where: { id: '00000000-0000-4000-8000-000000000001' }, update: {}, create: { id: '00000000-0000-4000-8000-000000000001', tenantId: tenant.id, name: 'Demo Mall Building', address: 'Demo Address' } });
   await prisma.staffAssignment.upsert({ where: { userId_buildingId: { userId: manager.id, buildingId: building.id } }, update: {}, create: { userId: manager.id, buildingId: building.id } });
-  const ground = await prisma.floor.upsert({ where: { buildingId_floorNumber: { buildingId: building.id, floorNumber: 1 } }, update: {}, create: { tenantId: tenant.id, buildingId: building.id, floorNumber: 1, name: 'Ground Floor' } });
-  const first = await prisma.floor.upsert({ where: { buildingId_floorNumber: { buildingId: building.id, floorNumber: 2 } }, update: {}, create: { tenantId: tenant.id, buildingId: building.id, floorNumber: 2, name: 'First Floor' } });
+  const ensureFloor = async (floorNumber: number, name: string) => {
+    const existing = await prisma.floor.findFirst({ where: { buildingId: building.id, floorNumber, deletedAt: null } });
+    return existing ?? prisma.floor.create({ data: { tenantId: tenant.id, buildingId: building.id, floorNumber, name } });
+  };
+  const ground = await ensureFloor(1, 'Ground Floor');
+  const first = await ensureFloor(2, 'First Floor');
   const nodeData = [
     ['00000000-0000-4000-8000-000000000101', ground.id, 100, 100, NodeType.NORMAL],
     ['00000000-0000-4000-8000-000000000102', ground.id, 300, 100, NodeType.ELEVATOR],
