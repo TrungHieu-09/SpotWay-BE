@@ -203,18 +203,15 @@ def walls_from_probability(probability: np.ndarray, floor_id: str) -> list[dict[
     binary = (probability >= WALL_THRESHOLD).astype(np.uint8) * 255
     height, width = binary.shape
 
-    # Directional morphological closing to bridge door openings & gaps (Janavee01/floorplan pattern)
-    kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
-    kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15))
-    closed_h = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_h)
-    closed_v = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_v)
-    closed = cv2.bitwise_or(closed_h, closed_v)
-    closed = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+    # Do not close directional gaps.  In a prepared plan, a gap in a thick
+    # black wall is a doorway and must remain open in the 2.5D model.
+    closed = binary
 
     # HoughLinesP with threshold calibrated for room partitions
     threshold = max(20, min(height, width) // 28)
     min_line_len = max(18, min(height, width) // 30)
-    max_line_gap = max(12, min(height, width) // 25)
+    # Only tolerate a tiny raster discontinuity, never a doorway-width gap.
+    max_line_gap = max(1, min(height, width) // 500)
 
     lines = cv2.HoughLinesP(
         closed, 1, np.pi / 180,
@@ -406,10 +403,15 @@ async def analyze(payload: AnalyzeRequest) -> dict[str, Any]:
                     return {
                         "engine": {"name": "FloorPlanTo3D-API-v2", "model": "CubiCasa5K ResNet-34 UNet", "version": "2.0"},
                         "image": {"width": int(image.shape[1]), "height": int(image.shape[0])},
-                        "polygons": norm_polys,
+                        # The upstream segmenter is trained to close room
+                        # outlines and can bridge door voids. Render our
+                        # gap-preserving line walls until explicit openings
+                        # are detected and reviewed by a manager.
+                        "polygons": {"wall": [], "door": [], "window": []},
                         "walls": walls_from_probability(structural_probability, payload.floorId),
                         "openings": [],
                         "labels": labels,
+                        "warnings": ["Door gaps are preserved; add or confirm openings in the map editor."],
                         "needsReview": False
                     }
     except Exception:
