@@ -310,9 +310,15 @@ def health() -> dict[str, Any]:
 
 @app.post("/v1/analyze")
 async def analyze(payload: AnalyzeRequest) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-        response = await client.get(str(payload.imageUrl))
-        response.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            response = await client.get(str(payload.imageUrl))
+            response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            422,
+            f"Unable to download the floor-plan image ({error}). Check that its storage URL is accessible.",
+        ) from error
     image = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise HTTPException(422, "The uploaded asset is not a supported raster floor-plan image")

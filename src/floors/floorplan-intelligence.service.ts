@@ -1,6 +1,7 @@
 import { BadGatewayException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Floor, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { StorageService } from './storage.service';
 
 type FloorPlanAnalysis = {
   engine: { name: string; model: string; version: string };
@@ -16,7 +17,10 @@ type FloorPlanAnalysis = {
 
 @Injectable()
 export class FloorplanIntelligenceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   async analyze(floor: Floor, createdById: string) {
     if (!floor.mapImageUrl) {
@@ -27,12 +31,13 @@ export class FloorplanIntelligenceService {
       throw new ServiceUnavailableException({ code: 'FLOORPLAN_INTELLIGENCE_UNAVAILABLE', message: 'Floor-plan intelligence service is not configured' });
     }
 
+    const imageUrl = await this.storage.createAnalysisReadUrl(floor.mapImageUrl);
     let response: Response;
     try {
       response = await fetch(`${serviceUrl}/v1/analyze`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ imageUrl: floor.mapImageUrl, floorId: floor.id }),
+        body: JSON.stringify({ imageUrl, floorId: floor.id }),
         signal: AbortSignal.timeout(Number(process.env.FLOORPLAN_ANALYSIS_TIMEOUT_MS ?? 120000)),
       });
     } catch {

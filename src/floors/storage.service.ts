@@ -51,4 +51,41 @@ export class StorageService {
       publicUrl: publicData.publicUrl,
     };
   }
+
+  /**
+   * Creates a short-lived download URL for an image that was uploaded through
+   * this service.  The stored URL is intentionally still the public-shaped
+   * object URL, but the analysis worker must also work when the bucket is
+   * private.
+   */
+  async createAnalysisReadUrl(url: string, expiresIn = 20 * 60): Promise<string> {
+    if (!this.supabase) return url;
+
+    let pathname: string;
+    try {
+      pathname = new URL(url).pathname;
+    } catch {
+      return url;
+    }
+
+    const prefix = `/storage/v1/object/public/${this.bucket}/`;
+    const position = pathname.indexOf(prefix);
+    if (position === -1) return url;
+
+    const path = decodeURIComponent(pathname.slice(position + prefix.length));
+    if (!path) return url;
+
+    const { data, error } = await this.supabase.storage
+      .from(this.bucket)
+      .createSignedUrl(path, expiresIn);
+
+    if (error || !data?.signedUrl) {
+      throw new InternalServerErrorException({
+        code: 'STORAGE_READ_URL_ERROR',
+        message: error?.message ?? 'Failed to create a temporary floor-plan read URL',
+      });
+    }
+
+    return data.signedUrl;
+  }
 }
