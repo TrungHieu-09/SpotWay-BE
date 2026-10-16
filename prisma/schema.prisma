@@ -51,6 +51,8 @@ enum NodeType {
   NORMAL
   DOOR
   ELEVATOR
+  STAIR
+  ESCALATOR
   JUNCTION
 }
 
@@ -195,6 +197,7 @@ model Node {
   floorId           String         @map("floor_id")
   x                 Float
   y                 Float
+  name              String?
   type              NodeType       @default(NORMAL)
   accessible        Boolean        @default(true)
   createdAt         DateTime       @default(now()) @map("created_at")
@@ -210,6 +213,7 @@ model Node {
   qrAnchors         QrAnchor[]
 
   @@index([tenantId, floorId, deletedAt])
+  @@index([floorId, name])
   @@map("nodes")
 }
 

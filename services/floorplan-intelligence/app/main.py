@@ -80,6 +80,53 @@ class AnalyzeRequest(BaseModel):
     floorId: str
 
 
+class NavigationAnalyzeRequest(AnalyzeRequest):
+    """Raw-image navigation suggestions for manager review; never persisted here."""
+
+
+def navigation_draft(image_bgr: np.ndarray) -> dict[str, Any]:
+    """Suggest a sparse walkable graph and possible stair zones.
+
+    Suggestions are deliberately conservative and carry no authority: a
+    manager must confirm, move, delete or reclassify every proposed node
+    before it can become a live navigation graph.
+    """
+    structural = structural_floorplan(image_bgr)
+    wall_mask = cv2.cvtColor(structural, cv2.COLOR_BGR2GRAY) < 128
+    height, width = wall_mask.shape
+    walkable = (~wall_mask).astype(np.uint8) * 255
+    safe_radius = max(3, round(min(height, width) * .006))
+    safe = cv2.erode(walkable, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (safe_radius * 2 + 1, safe_radius * 2 + 1)))
+
+    def is_safe(x: int, y: int) -> bool:
+        return 0 <= x < width and 0 <= y < height and safe[y, x] > 0
+
+    nodes: list[dict[str, Any]] = []
+    # A coarse, free-space sampling avoids presenting a dense and unsafe graph.
+    for gy in range(1, 8):
+        for gx in range(1, 10):
+            x, y = round(width * gx / 10), round(height * gy / 8)
+            if is_safe(x, y):
+                nodes.append({"id": f"n-{len(nodes) + 1}", "x": round(x / width * 100, 2), "y": round(y / height * 100, 2), "type": "NORMAL", "accessible": True, "confidence": .42, "requiresConfirmation": True})
+
+    # Only join nearby candidates when the full segment stays in safe free space.
+    def clear_segment(first: dict[str, Any], second: dict[str, Any]) -> bool:
+        x1, y1 = round(first["x"] / 100 * width), round(first["y"] / 100 * height)
+        x2, y2 = round(second["x"] / 100 * width), round(second["y"] / 100 * height)
+        samples = max(2, round(np.hypot(x2 - x1, y2 - y1) / max(3, safe_radius)))
+        return all(is_safe(round(x1 + (x2 - x1) * t / samples), round(y1 + (y2 - y1) * t / samples)) for t in range(samples + 1))
+
+    edges: list[dict[str, Any]] = []
+    for index, node in enumerate(nodes):
+        nearest = sorted((other for other in nodes[index + 1:]), key=lambda other: (other["x"] - node["x"]) ** 2 + (other["y"] - node["y"]) ** 2)[:3]
+        for other in nearest:
+            distance = float(np.hypot(other["x"] - node["x"], other["y"] - node["y"]))
+            if distance <= 18 and clear_segment(node, other):
+                edges.append({"id": f"e-{len(edges) + 1}", "fromNodeId": node["id"], "toNodeId": other["id"], "accessible": True, "confidence": .35, "requiresConfirmation": True})
+
+    return {"nodes": nodes, "edges": edges, "warnings": ["Đây là gợi ý đường đi từ ảnh. Manager phải xác nhận và chỉnh sửa trước khi áp dụng.", "Cầu thang, thang cuốn và thang máy cần được Manager đánh dấu/xác nhận trên bản vẽ thực tế."], "image": {"width": width, "height": height}}
+
+
 def tile_positions(length: int) -> list[int]:
     end = max(0, length - PATCH_SIZE)
     values = list(range(0, end + 1, PATCH_STRIDE)) or [0]
@@ -385,3 +432,18 @@ async def analyze(payload: AnalyzeRequest) -> dict[str, Any]:
         "warnings": [],
         "needsReview": False
     }
+
+
+@app.post("/v1/navigation-analyze")
+async def analyze_navigation(payload: NavigationAnalyzeRequest) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            response = await client.get(str(payload.imageUrl))
+            response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(422, f"Unable to download the floor-plan image ({error}).") from error
+
+    image = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(422, "The uploaded asset is not a supported raster floor-plan image")
+    return navigation_draft(image)

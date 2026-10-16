@@ -5,7 +5,7 @@ import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
-import { CreateEdgeDto, CreateElevatorLinkDto, CreateNodeDto, CreatePoiDto, EdgeResponse, ElevatorLinkResponse, NodeResponse, PoiResponse, UpdateEdgeDto, UpdateNodeDto, UpdatePoiDto } from './graph.dto';
+import { ApplyNavigationDraftDto, CreateEdgeDto, CreateElevatorLinkDto, CreateNodeDto, CreatePoiDto, EdgeResponse, ElevatorLinkResponse, NodeResponse, PoiResponse, UpdateEdgeDto, UpdateNodeDto, UpdatePoiDto } from './graph.dto';
 import { GraphService } from './graph.service';
 
 const graphRoles = [UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.BUILDING_MANAGER];
@@ -21,6 +21,8 @@ export class GraphController {
   listNodes(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string) { return this.graph.listNodes(user, floorId); }
   @Post('floors/:floorId/nodes') @ApiOperation({ summary: 'Create a map node' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(201, 'Node created successfully', { $ref: '#/components/schemas/NodeResponse' }) @ApiStandardErrors() @Roles(...graphRoles)
   createNode(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string, @Body() dto: CreateNodeDto) { return this.graph.createNode(user, floorId, dto); }
+  @Post('floors/:floorId/navigation-draft/apply') @ApiOperation({ summary: 'Apply manager-confirmed navigation draft nodes and edges' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(201, 'Navigation draft applied') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_MANAGER)
+  applyNavigationDraft(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string, @Body() dto: ApplyNavigationDraftDto) { return this.graph.applyNavigationDraft(user, floorId, dto); }
   @Get('nodes/:id') @ApiOperation({ summary: 'Get a map node' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Node found', { $ref: '#/components/schemas/NodeResponse' }) @ApiStandardErrors() @Roles(...graphRoles)
   getNode(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.graph.getNode(user, id); }
   @Patch('nodes/:id') @ApiOperation({ summary: 'Update a map node' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Node updated successfully', { $ref: '#/components/schemas/NodeResponse' }) @ApiStandardErrors() @Roles(...graphRoles)

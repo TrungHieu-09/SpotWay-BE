@@ -62,11 +62,12 @@ export class NavigationService {
   async search(buildingId: string, query: PublicSearchQuery) {
     await this.activeBuilding(buildingId); const floors = await this.publishedFloors(buildingId); const floorIds = floors.map(({ id }) => id); if (!floorIds.length) return { items: [], pagination: pageMeta(query.page, query.limit, 0) };
     const term = query.q?.trim(); const nameFilter = term ? { contains: term, mode: 'insensitive' as const } : undefined;
-    const [stores, pois] = await Promise.all([
-      query.type === 'POI' ? [] : this.prisma.store.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, status: StoreStatus.ACTIVE, ...(nameFilter ? { name: nameFilter } : {}), node: { is: { deletedAt: null } } }, include: { node: true } }),
-      query.type === 'STORE' ? [] : this.prisma.poi.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, ...(nameFilter ? { name: nameFilter } : {}), node: { is: { deletedAt: null } } }, include: { node: true } }),
+    const [stores, pois, nodes] = await Promise.all([
+      query.type === 'POI' || query.type === 'NODE' ? [] : this.prisma.store.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, status: StoreStatus.ACTIVE, ...(nameFilter ? { name: nameFilter } : {}), node: { is: { deletedAt: null } } }, include: { node: true } }),
+      query.type === 'STORE' || query.type === 'NODE' ? [] : this.prisma.poi.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, ...(nameFilter ? { name: nameFilter } : {}), node: { is: { deletedAt: null } } }, include: { node: true } }),
+      query.type === 'STORE' || query.type === 'POI' ? [] : this.prisma.node.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, name: { not: null, ...(nameFilter ?? {}) } } }),
     ]);
-    const items = [...stores.map((store) => ({ type: 'STORE' as const, id: store.id, name: store.name, floorId: store.floorId, nodeId: store.nodeId!, x: store.node!.x, y: store.node!.y })), ...pois.map((poi) => ({ type: 'POI' as const, id: poi.id, name: poi.name, floorId: poi.floorId, nodeId: poi.nodeId, x: poi.node.x, y: poi.node.y }))].sort((a, b) => a.name.localeCompare(b.name));
+    const items = [...stores.map((store) => ({ type: 'STORE' as const, id: store.id, name: store.name, floorId: store.floorId, nodeId: store.nodeId!, x: store.node!.x, y: store.node!.y })), ...pois.map((poi) => ({ type: 'POI' as const, id: poi.id, name: poi.name, floorId: poi.floorId, nodeId: poi.nodeId, x: poi.node.x, y: poi.node.y })), ...nodes.map((node) => ({ type: 'NODE' as const, id: node.id, name: node.name!, floorId: node.floorId, nodeId: node.id, x: node.x, y: node.y }))].sort((a, b) => a.name.localeCompare(b.name));
     const total = items.length; void this.analytics.enqueue({ eventType: 'SEARCH_PERFORMED', tenantId: floors[0].tenantId, buildingId, context: { query: term ?? null, resultCount: total, type: query.type ?? 'ALL' } }).catch(() => undefined); return { items: items.slice((query.page - 1) * query.limit, query.page * query.limit), pagination: pageMeta(query.page, query.limit, total) };
   }
 

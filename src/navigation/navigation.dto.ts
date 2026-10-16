@@ -4,7 +4,7 @@ import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, M
 
 export class PublicSearchQuery {
   @ApiPropertyOptional({ example: 'coffee', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) q?: string;
-  @ApiPropertyOptional({ enum: ['STORE', 'POI'] }) @IsOptional() @IsIn(['STORE', 'POI']) type?: 'STORE' | 'POI';
+  @ApiPropertyOptional({ enum: ['STORE', 'POI', 'NODE'] }) @IsOptional() @IsIn(['STORE', 'POI', 'NODE']) type?: 'STORE' | 'POI' | 'NODE';
   @ApiPropertyOptional({ example: 1, default: 1 }) @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
   @ApiPropertyOptional({ example: 20, default: 20 }) @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;
 }
@@ -16,7 +16,7 @@ export class CreateRouteDto {
 }
 
 export class PublicSearchResult {
-  @ApiProperty({ enum: ['STORE', 'POI'] }) type!: 'STORE' | 'POI';
+  @ApiProperty({ enum: ['STORE', 'POI', 'NODE'] }) type!: 'STORE' | 'POI' | 'NODE';
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ example: 'Demo Store' }) name!: string;
   @ApiProperty({ format: 'uuid' }) floorId!: string;

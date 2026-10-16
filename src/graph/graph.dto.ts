@@ -1,10 +1,12 @@
 import { EdgeStatus, NodeType, PoiCategory } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
 
 export class CreateNodeDto {
   @ApiProperty({ example: 240.5 }) @IsNumber() x!: number;
   @ApiProperty({ example: 120.25 }) @IsNumber() y!: number;
+  @ApiPropertyOptional({ example: 'Cửa vào Zara', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) name?: string;
   @ApiProperty({ enum: NodeType, example: NodeType.JUNCTION }) @IsEnum(NodeType) type!: NodeType;
   @ApiPropertyOptional({ example: true, default: true }) @IsOptional() @IsBoolean() accessible?: boolean;
 }
@@ -12,6 +14,7 @@ export class UpdateNodeDto {
   @ApiPropertyOptional({ example: 240.5 }) @IsOptional() @IsNumber() x?: number;
   @ApiPropertyOptional({ example: 120.25 }) @IsOptional() @IsNumber() y?: number;
   @ApiPropertyOptional({ enum: NodeType }) @IsOptional() @IsEnum(NodeType) type?: NodeType;
+  @ApiPropertyOptional({ example: 'Thang máy A', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) name?: string;
   @ApiPropertyOptional({ example: true }) @IsOptional() @IsBoolean() accessible?: boolean;
 }
 export class CreateEdgeDto {
@@ -40,6 +43,25 @@ export class CreateElevatorLinkDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() nodeIdFrom!: string;
   @ApiProperty({ format: 'uuid' }) @IsUUID() nodeIdTo!: string;
 }
+export class NavigationDraftNodeDto {
+  @IsString() id!: string;
+  @IsNumber() x!: number;
+  @IsNumber() y!: number;
+  @IsEnum(NodeType) type!: NodeType;
+  @IsOptional() @IsBoolean() accessible?: boolean;
+  @IsOptional() @IsBoolean() confirmed?: boolean;
+}
+export class NavigationDraftEdgeDto {
+  @IsString() id!: string;
+  @IsString() fromNodeId!: string;
+  @IsString() toNodeId!: string;
+  @IsOptional() @IsBoolean() accessible?: boolean;
+  @IsOptional() @IsBoolean() confirmed?: boolean;
+}
+export class ApplyNavigationDraftDto {
+  @IsArray() @ValidateNested({ each: true }) @Type(() => NavigationDraftNodeDto) nodes!: NavigationDraftNodeDto[];
+  @IsArray() @ValidateNested({ each: true }) @Type(() => NavigationDraftEdgeDto) edges!: NavigationDraftEdgeDto[];
+}
 
 export class NodeResponse {
   @ApiProperty({ format: 'uuid' }) id!: string;
@@ -47,6 +69,7 @@ export class NodeResponse {
   @ApiProperty({ format: 'uuid' }) floorId!: string;
   @ApiProperty({ example: 240.5 }) x!: number;
   @ApiProperty({ example: 120.25 }) y!: number;
+  @ApiPropertyOptional({ example: 'Cửa vào Zara', nullable: true }) name!: string | null;
   @ApiProperty({ enum: NodeType }) type!: NodeType;
   @ApiProperty({ example: true }) accessible!: boolean;
   @ApiProperty({ format: 'date-time' }) createdAt!: Date;
