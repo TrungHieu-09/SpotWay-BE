@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiParam, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
+import { IsEmail, IsString, MinLength } from 'class-validator';
 import { CurrentUser } from '../common/current-user.decorator';
 import { AuthUser } from '../common/auth.types';
 import { Roles } from '../common/roles.decorator';
@@ -8,6 +9,8 @@ import { BuildingsService } from './buildings.service';
 import { BuildingResponse, CreateBuildingDto, UpdateBuildingDto } from './dto';
 import { PaginationQuery } from '../common/pagination';
 import { ApiEnvelopeResponse, ApiPagedEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
+class AssignManagerByEmailDto { @ApiProperty({ example: 'manager@demo-mall.local', format: 'email' }) @IsEmail() email!: string; }
+class CreateAndAssignManagerDto { @ApiProperty({ example: 'manager@demo-mall.local', format: 'email' }) @IsEmail() email!: string; @ApiProperty({ example: 'TemporaryPassword123!', minLength: 8 }) @IsString() @MinLength(8) password!: string; }
 @ApiTags('Buildings') @ApiExtraModels(BuildingResponse) @ApiBearerAuth('bearerAuth') @Controller('buildings')
 export class BuildingsController {
   constructor(private readonly buildings: BuildingsService) {}
@@ -17,5 +20,7 @@ export class BuildingsController {
   @Patch(':id') @ApiOperation({ summary: 'Update a building' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Building updated successfully', { $ref: '#/components/schemas/BuildingResponse' }) @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.BUILDING_MANAGER) update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateBuildingDto) { return this.buildings.update(user, id, dto); }
   @Delete(':id') @ApiOperation({ summary: 'Soft-delete a building' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Building deleted successfully', { $ref: '#/components/schemas/BuildingResponse' }) @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER) remove(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.buildings.remove(user, id); }
   @Post(':id/managers/:userId') @ApiOperation({ summary: 'Assign a Building Manager' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiParam({ name: 'userId', format: 'uuid' }) @ApiEnvelopeResponse(201, 'Manager assigned successfully') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER) assign(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('userId') userId: string) { return this.buildings.assignManager(user, id, userId); }
+  @Post(':id/managers/by-email') @ApiOperation({ summary: 'Assign a Building Manager by email' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(201, 'Manager assigned successfully') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER) assignByEmail(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: AssignManagerByEmailDto) { return this.buildings.assignManagerByEmail(user, id, dto.email); }
+  @Post(':id/managers') @ApiOperation({ summary: 'Create and assign a Building Manager' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(201, 'Manager created and assigned successfully') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER) createAndAssign(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CreateAndAssignManagerDto) { return this.buildings.createAndAssignManager(user, id, dto.email, dto.password); }
   @Delete(':id/managers/:userId') @ApiOperation({ summary: 'Revoke a Building Manager assignment' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiParam({ name: 'userId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Manager assignment revoked successfully') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER) revoke(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('userId') userId: string) { return this.buildings.revokeManager(user, id, userId); }
 }
