@@ -14,4 +14,6 @@ dist/
 coverage/
 node_modules/
 __pycache__/
+services/floorplan-intelligence/.venv/
+services/floorplan-to-3d-api/.venv*/
 services/floorplan-intelligence/models/

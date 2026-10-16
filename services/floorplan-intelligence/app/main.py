@@ -17,8 +17,9 @@ MODEL_PATH = os.getenv("FLOORPLAN_MODEL_PATH", "models/stitch-unet.pth")
 PATCH_SIZE = 256
 PATCH_STRIDE = int(os.getenv("FLOORPLAN_TILE_STRIDE", "128"))
 WALL_THRESHOLD = float(os.getenv("FLOORPLAN_WALL_THRESHOLD", "0.5"))
+DARK_INK_THRESHOLD = int(os.getenv("FLOORPLAN_DARK_INK_THRESHOLD", "110"))
+NEUTRAL_INK_CHROMA_MAX = int(os.getenv("FLOORPLAN_NEUTRAL_INK_CHROMA_MAX", "40"))
 model: nn.Module | None = None
-ocr: Any | None = None
 
 
 class DoubleConv(nn.Module):
@@ -58,7 +59,7 @@ class TiledWallUNet(nn.Module):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global model, ocr
+    global model
     if os.path.isfile(MODEL_PATH):
         candidate = TiledWallUNet()
         try:
@@ -68,11 +69,6 @@ async def lifespan(_: FastAPI):
         candidate.load_state_dict(weights, strict=True)
         candidate.eval()
         model = candidate
-    try:
-        from paddleocr import PaddleOCR
-        ocr = PaddleOCR(lang=os.getenv("FLOORPLAN_OCR_LANG", "en"))
-    except Exception:
-        ocr = None
     yield
 
 
@@ -90,61 +86,41 @@ def tile_positions(length: int) -> list[int]:
     return values if values[-1] == end else [*values, end]
 
 
-def erase_text_from_blueprint(img_rgb: np.ndarray) -> np.ndarray:
-    """Remove room labels (BED ROOM, PASSAGE, KITCHEN) & dimension text using connected components and color exclusion."""
-    H, W = img_rgb.shape[:2]
-    min_dim = min(H, W)
+def structural_floorplan(image_bgr: np.ndarray) -> np.ndarray:
+    """Return a black-and-white structural mask suitable for 3D extraction.
 
-    # Convert to grayscale
-    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+    Only dark, near-neutral ink survives. This deliberately removes blue/red
+    doors, coloured markup, text and thin dashed/dimension strokes before any
+    model or the external FloorPlanTo3D API sees the image.
+    """
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    bgr = image_bgr.astype(np.int16)
+    chroma = bgr.max(axis=2) - bgr.min(axis=2)
 
-    # Pure dark ink (walls and text glyphs)
-    is_dark = gray < 90
-    # Red columns
-    is_red = (img_rgb[:, :, 0] > 140) & (img_rgb[:, :, 1] < 90) & (img_rgb[:, :, 2] < 90)
-    # Exclude blue doors and magenta stairs
-    is_blue = (img_rgb[:, :, 2] > 105) & (img_rgb[:, :, 0] < 90)
-    is_magenta = (img_rgb[:, :, 0] > 115) & (img_rgb[:, :, 2] > 115) & (img_rgb[:, :, 1] < 95)
+    # Blue is dark in grayscale, so grayscale-only thresholding is unsafe.
+    # Requiring neutral ink removes all coloured drawing conventions, including
+    # blue door swings and blue dashed annotations.
+    dark_neutral_ink = (gray <= DARK_INK_THRESHOLD) & (chroma <= NEUTRAL_INK_CHROMA_MAX)
+    ink = dark_neutral_ink.astype(np.uint8) * 255
 
-    binary = ((is_dark | is_red) & ~is_blue & ~is_magenta).astype(np.uint8) * 255
-    num_labels, label_map, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    # Walls are materially thicker than text, hatching, stair treads and
+    # dimension dashes. Keep only the thick centre of each stroke, then expand
+    # it back to a stable mask. The scale adapts to imported image resolution.
+    minimum_half_width = max(2, round(min(image_bgr.shape[:2]) * 0.0025))
+    thickness = cv2.distanceTransform(ink, cv2.DIST_L2, 5)
+    wall_centres = (thickness >= minimum_half_width).astype(np.uint8) * 255
+    diameter = minimum_half_width * 2 - 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (diameter, diameter))
+    mask = cv2.dilate(wall_centres, kernel)
 
-    text_limit_max_d = max(38, int(round(H * 0.032)))
-    text_limit_min_d = max(18, int(round(H * 0.015)))
-    text_limit_word_d = max(90, int(round(H * 0.09)))
-
-    is_text = np.zeros(num_labels, dtype=bool)
-    for i in range(1, num_labels):
-        area = int(stats[i, cv2.CC_STAT_AREA])
-        w_px = int(stats[i, cv2.CC_STAT_WIDTH])
-        h_px = int(stats[i, cv2.CC_STAT_HEIGHT])
-        max_d = max(w_px, h_px)
-        min_d = min(w_px, h_px)
-        cx, cy = centroids[i]
-
-        # Border dimension lines and arrows
-        is_outer = (cx < W * 0.03 or cx > W * 0.97 or cy < H * 0.035 or cy > H * 0.93)
-        is_glyph = (max_d < text_limit_max_d and area < 450) or (min_d < text_limit_min_d and area < 650 and max_d < text_limit_word_d) or (area < 50)
-
-        if is_outer or is_glyph:
-            is_text[i] = True
-
-    text_mask = is_text[label_map].astype(np.uint8) * 255
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    text_mask = cv2.dilate(text_mask, k, iterations=1)
-    result = img_rgb.copy()
-    result[text_mask > 0] = 255
-
-    # Also wipe out light-grey AC / ceiling dashed lines (gray >= 95 and near-neutral)
-    mid_gray = (gray >= 95) & (gray < 220) & (np.abs(img_rgb[:, :, 0].astype(int) - img_rgb[:, :, 1].astype(int)) < 15) & (np.abs(img_rgb[:, :, 1].astype(int) - img_rgb[:, :, 2].astype(int)) < 15)
-    result[mid_gray] = 255
-    return result
+    # PNG is intentionally strict: black structural geometry on white only.
+    cleaned = np.full_like(gray, 255)
+    cleaned[mask > 0] = 0
+    return cv2.cvtColor(cleaned, cv2.COLOR_GRAY2BGR)
 
 
 def wall_probability(image: np.ndarray) -> np.ndarray:
-    # Always erase text annotations & AC dashed lines from blueprint first
-    image_clean = erase_text_from_blueprint(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    image = cv2.cvtColor(image_clean, cv2.COLOR_RGB2BGR)
+    image = structural_floorplan(image)
 
     if model is not None:
         source = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -329,7 +305,7 @@ def polygons_from_mask(mask: np.ndarray, width: int, height: int) -> dict[str, l
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok" if model else "model-unavailable", "modelPath": MODEL_PATH, "engine": "CubiCasa5k FloorPlanTo3D Intelligence", "ocr": bool(ocr)}
+    return {"status": "ok" if model else "model-unavailable", "modelPath": MODEL_PATH, "engine": "CubiCasa5k FloorPlanTo3D Intelligence", "ocr": False}
 
 
 @app.post("/v1/analyze")
@@ -340,23 +316,22 @@ async def analyze(payload: AnalyzeRequest) -> dict[str, Any]:
     image = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise HTTPException(422, "The uploaded asset is not a supported raster floor-plan image")
-    probability = wall_probability(image)
+    structural_image = structural_floorplan(image)
+    structural_probability = (
+        cv2.cvtColor(structural_image, cv2.COLOR_BGR2GRAY) < 128
+    ).astype(np.float32)
     labels: list[dict[str, Any]] = []
-    if ocr:
-        try:
-            for item in ocr.predict(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)):
-                for text, score, box in zip(item.get("rec_texts", []), item.get("rec_scores", []), item.get("rec_polys", [])):
-                    if float(score) >= .65 and str(text).strip():
-                        center = np.asarray(box).mean(axis=0)
-                        labels.append({"text": str(text).strip(), "x": round(float(center[0]) / image.shape[1] * 100, 3), "y": round(float(center[1]) / image.shape[0] * 100, 3), "confidence": round(float(score), 3)})
-        except Exception:
-            labels = []
 
     # 1. Forward to external FloorPlanTo3D-API-v2 if running on port 8000
     external_url = os.getenv("FLOORPLANTO3D_API_URL", "http://localhost:8000")
     try:
+        encoded, structural_png = cv2.imencode(".png", structural_image)
+        if not encoded:
+            raise RuntimeError("Could not encode the normalized floor plan")
         async with httpx.AsyncClient(timeout=15) as client:
-            files = {"file": ("floorplan.png", response.content, "image/png")}
+            # Do not give the 3D extractor the raw upload: its blue symbols,
+            # labels and dashed lines otherwise become fake walls/openings.
+            files = {"file": ("structure-mask.png", structural_png.tobytes(), "image/png")}
             ext_resp = await client.post(f"{external_url}/extract", files=files)
             if ext_resp.status_code == 200:
                 data = ext_resp.json()
@@ -379,7 +354,7 @@ async def analyze(payload: AnalyzeRequest) -> dict[str, Any]:
                         "engine": {"name": "FloorPlanTo3D-API-v2", "model": "CubiCasa5K ResNet-34 UNet", "version": "2.0"},
                         "image": {"width": int(image.shape[1]), "height": int(image.shape[0])},
                         "polygons": norm_polys,
-                        "walls": walls_from_probability(probability, payload.floorId),
+                        "walls": walls_from_probability(structural_probability, payload.floorId),
                         "openings": [],
                         "labels": labels,
                         "needsReview": False
@@ -388,6 +363,9 @@ async def analyze(payload: AnalyzeRequest) -> dict[str, Any]:
         pass
 
     # 2. Built-in CubiCasa contour polygon extractor fallback
+    # The legacy local U-Net is expensive on CPU. Only run it if the primary
+    # CubiCasa-trained FloorPlanTo3D API is unavailable or rejects the image.
+    probability = wall_probability(image)
     polygons = polygons_from_mask((probability >= WALL_THRESHOLD).astype(np.uint8) * 255, image.shape[1], image.shape[0])
 
     return {
