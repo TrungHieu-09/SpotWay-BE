@@ -1,0 +1,6 @@
+[submodule "services/cubicasa5k"]
+	path = services/cubicasa5k
+	url = https://github.com/CubiCasa/CubiCasa5k.git
+[submodule "services/floorplan-to-3d-api"]
+	path = services/floorplan-to-3d-api
+	url = https://github.com/WDP-SangDN-Organization/FloorPlanTo3D-API-v2.git
