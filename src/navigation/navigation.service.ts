@@ -101,8 +101,34 @@ export class NavigationService {
 
   async overview(buildingId: string) {
     const building = await this.activeBuilding(buildingId); const floors = await this.publishedFloors(buildingId);
-    const links = await this.prisma.elevatorLink.findMany({ where: { buildingId, deletedAt: null }, select: { nodeIdFrom: true, nodeIdTo: true } });
+    const floorIds = floors.map((f) => f.id);
+    const [links, nodes, edges, pois, stores, revisions] = await Promise.all([
+      this.prisma.elevatorLink.findMany({ where: { buildingId, deletedAt: null }, select: { id: true, nodeIdFrom: true, nodeIdTo: true } }),
+      floorIds.length ? this.prisma.node.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, x: true, y: true, type: true, accessible: true } }) : Promise.resolve([]),
+      floorIds.length ? this.prisma.edge.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, fromNodeId: true, toNodeId: true, weight: true } }) : Promise.resolve([]),
+      floorIds.length ? this.prisma.poi.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, nodeId: true, name: true, category: true } }) : Promise.resolve([]),
+      floorIds.length ? this.prisma.store.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, status: StoreStatus.ACTIVE }, select: { id: true, floorId: true, nodeId: true, name: true, status: true } }) : Promise.resolve([]),
+      floorIds.length ? this.prisma.floorMapRevision.findMany({ where: { floorId: { in: floorIds } }, distinct: ['floorId'], orderBy: [{ floorId: 'asc' }, { version: 'desc' }], select: { floorId: true, version: true, editorState: true, publishedAt: true } }) : Promise.resolve([]),
+    ]);
+    const revisionByFloor = new Map(revisions.map((revision) => [revision.floorId, revision]));
     const minFloor = floors.reduce((minimum, floor) => Math.min(minimum, floor.floorNumber), 0);
-    return { building: { id: building.id, defaultFloorHeight: building.defaultFloorHeight }, floors: floors.map((floor) => ({ id: floor.id, floorNumber: floor.floorNumber, name: floor.name, elevation: floor.elevation ?? (floor.floorNumber - minFloor) * building.defaultFloorHeight, mapImageUrl: floor.mapImageUrl, mapWidth: floor.mapWidth, mapHeight: floor.mapHeight })), verticalLinks: links.map((link) => ({ ...link, kind: 'ELEVATOR' })) };
+    return {
+      building: { id: building.id, defaultFloorHeight: building.defaultFloorHeight, name: building.name },
+      floors: floors.map((floor) => ({
+        id: floor.id,
+        floorNumber: floor.floorNumber,
+        name: floor.name,
+        elevation: floor.elevation ?? (floor.floorNumber - minFloor) * building.defaultFloorHeight,
+        mapImageUrl: floor.mapImageUrl,
+        mapWidth: floor.mapWidth,
+        mapHeight: floor.mapHeight,
+        mapRevision: revisionByFloor.get(floor.id),
+      })),
+      verticalLinks: links.map((link) => ({ ...link, kind: 'ELEVATOR' })),
+      nodes,
+      edges,
+      pois,
+      stores,
+    };
   }
 }
