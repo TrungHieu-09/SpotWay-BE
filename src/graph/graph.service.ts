@@ -57,7 +57,7 @@ export class GraphService {
     return this.prisma.$transaction(async (tx) => {
       const ids = new Map<string, string>();
       for (const proposal of accepted) {
-        const node = await tx.node.create({ data: { floorId, tenantId: floor.tenantId, x: proposal.x, y: proposal.y, type: proposal.type, accessible: proposal.accessible ?? true } });
+        const node = await tx.node.create({ data: { floorId, tenantId: floor.tenantId, x: proposal.x, y: proposal.y, name: proposal.name?.trim() || null, type: proposal.type, accessible: proposal.accessible ?? true } });
         ids.set(proposal.id, node.id);
       }
       let edgeCount = 0;

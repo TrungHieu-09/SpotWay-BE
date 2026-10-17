@@ -47,6 +47,7 @@ export class NavigationDraftNodeDto {
   @IsString() id!: string;
   @IsNumber() x!: number;
   @IsNumber() y!: number;
+  @IsOptional() @IsString() @MaxLength(100) name?: string | null;
   @IsEnum(NodeType) type!: NodeType;
   @IsOptional() @IsBoolean() accessible?: boolean;
   @IsOptional() @IsBoolean() confirmed?: boolean;

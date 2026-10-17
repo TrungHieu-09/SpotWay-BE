@@ -91,7 +91,21 @@ export class FloorplanIntelligenceService {
     if (!Array.isArray(body.nodes) || !Array.isArray(body.edges)) {
       throw new BadGatewayException({ code: 'NAVIGATION_ANALYSIS_INVALID', message: 'Navigation analysis returned an invalid draft' });
     }
-    return body;
+    const source = body as { image?: { width?: number; height?: number }; nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    const sourceWidth = source.image?.width || floor.mapWidth || 1;
+    const sourceHeight = source.image?.height || floor.mapHeight || 1;
+    const targetWidth = floor.mapWidth || sourceWidth;
+    const targetHeight = floor.mapHeight || sourceHeight;
+    // AI emits percentages so it is resolution-independent.  Map editor nodes
+    // use map pixels; convert once at the boundary so draft and real nodes are
+    // editable with exactly the same coordinate system.
+    const nodes = source.nodes.map((node) => ({
+      ...node,
+      x: Number(node.x) / 100 * targetWidth,
+      y: Number(node.y) / 100 * targetHeight,
+      name: null,
+    }));
+    return { ...source, nodes, edges: source.edges };
   }
 
   latest(floorId: string) {
