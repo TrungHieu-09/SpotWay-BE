@@ -101,30 +101,11 @@ def navigation_draft(image_bgr: np.ndarray) -> dict[str, Any]:
     def is_safe(x: int, y: int) -> bool:
         return 0 <= x < width and 0 <= y < height and safe[y, x] > 0
 
-    nodes: list[dict[str, Any]] = []
-    # A coarse, free-space sampling avoids presenting a dense and unsafe graph.
-    for gy in range(1, 8):
-        for gx in range(1, 10):
-            x, y = round(width * gx / 10), round(height * gy / 8)
-            if is_safe(x, y):
-                nodes.append({"id": f"n-{len(nodes) + 1}", "x": round(x / width * 100, 2), "y": round(y / height * 100, 2), "type": "NORMAL", "accessible": True, "confidence": .42, "requiresConfirmation": True})
-
-    # Only join nearby candidates when the full segment stays in safe free space.
-    def clear_segment(first: dict[str, Any], second: dict[str, Any]) -> bool:
-        x1, y1 = round(first["x"] / 100 * width), round(first["y"] / 100 * height)
-        x2, y2 = round(second["x"] / 100 * width), round(second["y"] / 100 * height)
-        samples = max(2, round(np.hypot(x2 - x1, y2 - y1) / max(3, safe_radius)))
-        return all(is_safe(round(x1 + (x2 - x1) * t / samples), round(y1 + (y2 - y1) * t / samples)) for t in range(samples + 1))
-
-    edges: list[dict[str, Any]] = []
-    for index, node in enumerate(nodes):
-        nearest = sorted((other for other in nodes[index + 1:]), key=lambda other: (other["x"] - node["x"]) ** 2 + (other["y"] - node["y"]) ** 2)[:3]
-        for other in nearest:
-            distance = float(np.hypot(other["x"] - node["x"], other["y"] - node["y"]))
-            if distance <= 18 and clear_segment(node, other):
-                edges.append({"id": f"e-{len(edges) + 1}", "fromNodeId": node["id"], "toNodeId": other["id"], "accessible": True, "confidence": .35, "requiresConfirmation": True})
-
-    return {"nodes": nodes, "edges": edges, "warnings": ["Đây là gợi ý đường đi từ ảnh. Manager phải xác nhận và chỉnh sửa trước khi áp dụng.", "Cầu thang, thang cuốn và thang máy cần được Manager đánh dấu/xác nhận trên bản vẽ thực tế."], "image": {"width": width, "height": height}}
+    # A formatted architectural image contains no reliable shop identity.
+    # Never fabricate a dense grid of route nodes: the only valid generated
+    # nodes are confirmed entrance/vertical-transport symbols.  Manager adds
+    # a name and confirms each candidate before it becomes a graph endpoint.
+    return {"nodes": [], "edges": [], "warnings": ["Analyze điều hướng không tự đặt node lưới. Node chỉ được tạo tại cửa hàng/cửa ra vào, thang máy, cầu thang hoặc thang cuốn sau khi Manager xác nhận và đặt tên.", "Ảnh đã format bỏ chữ nên không thể biết tên cửa hàng; hãy đặt tên node tại đúng cửa trên Map Editor."], "image": {"width": width, "height": height}}
 
 
 def tile_positions(length: int) -> list[int]:
@@ -232,11 +213,9 @@ def walls_from_probability(probability: np.ndarray, floor_id: str) -> list[dict[
         px2 = round(x2 / width * 100, 3)
         py2 = round(y2 / height * 100, 3)
 
-        # Ignore outer boundary border & dimension lines
-        if (px1 <= 2.8 and px2 <= 2.8) or (px1 >= 97.5 and px2 >= 97.5):
-            continue
-        if (py1 <= 2.8 and py2 <= 2.8) or (py1 >= 93.8 and py2 >= 93.8):
-            continue
+        # Do not discard lines on the image boundary.  Imported plans are
+        # intentionally cropped to their building outline, so those lines are
+        # the exterior walls rather than drawing borders/dimension guides.
 
         dx = abs(px2 - px1)
         dy = abs(py2 - py1)
