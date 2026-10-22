@@ -16,6 +16,6 @@ export class NavigationController {
   map(@Param('floorId') floorId: string) { return this.navigation.map(floorId); }
   @Get('buildings/:buildingId/search') @ApiOperation({ summary: 'Search active stores and POIs in published floors' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiQuery({ name: 'q', required: false }) @ApiQuery({ name: 'type', required: false, enum: ['STORE', 'POI'] }) @ApiQuery({ name: 'page', required: false }) @ApiQuery({ name: 'limit', required: false }) @ApiEnvelopeResponse(200, 'Search results returned successfully') @ApiStandardErrors()
   search(@Param('buildingId') buildingId: string, @Query() query: PublicSearchQuery) { return this.navigation.search(buildingId, query); }
-  @Post('routes') @ApiOperation({ summary: 'Calculate the shortest published indoor route to an active store' }) @ApiBody({ type: CreateRouteDto }) @ApiEnvelopeResponse(201, 'Route calculated successfully', { $ref: '#/components/schemas/RouteResponse' }) @ApiStandardErrors()
+  @Post('routes') @ApiOperation({ summary: 'Calculate a shortest indoor route or safe evacuation route' }) @ApiBody({ type: CreateRouteDto }) @ApiEnvelopeResponse(201, 'Route calculated successfully', { $ref: '#/components/schemas/RouteResponse' }) @ApiStandardErrors()
   route(@Body() dto: CreateRouteDto) { return this.navigation.route(dto); }
 }

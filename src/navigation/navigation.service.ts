@@ -1,24 +1,54 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { BuildingStatus, EdgeStatus, FloorPublishStatus, StoreStatus, TenantStatus } from '@prisma/client';
+import { BuildingStatus, EdgeStatus, FloorPublishStatus, NodeType, PoiCategory, StoreStatus, TenantStatus } from '@prisma/client';
 import { pageMeta } from '../common/pagination';
 import { PrismaService } from '../database/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { CreateRouteDto, PublicSearchQuery } from './navigation.dto';
 
-type GraphEdge = { to: string; weight: number; kind: 'WALK' | 'ELEVATOR' };
-type Graph = Map<string, GraphEdge[]>;
-type DijkstraResult = { distance: number; nodeIds: string[]; edges: GraphEdge[] } | null;
+export type GraphEdge = {
+  to: string;
+  weight: number;
+  kind: "WALK" | "ELEVATOR";
+};
+export type Graph = Map<string, GraphEdge[]>;
+export type DijkstraResult = {
+  distance: number;
+  nodeIds: string[];
+  edges: GraphEdge[];
+} | null;
+export type DijkstraOptions = {
+  blockedNodeIds?: ReadonlySet<string>;
+  excludedKinds?: ReadonlySet<GraphEdge["kind"]>;
+};
 
-export function dijkstra(graph: Graph, source: string, target: string): DijkstraResult {
+export function dijkstra(
+  graph: Graph,
+  source: string,
+  target: string | ReadonlySet<string>,
+  options: DijkstraOptions = {},
+): DijkstraResult {
+  const targets = typeof target === "string" ? new Set([target]) : target;
+  if (!targets.size || options.blockedNodeIds?.has(source)) return null;
   const distances = new Map<string, number>([[source, 0]]);
   const previous = new Map<string, { nodeId: string; edge: GraphEdge }>();
-  const queue: Array<{ nodeId: string; distance: number }> = [{ nodeId: source, distance: 0 }];
+  const queue: Array<{ nodeId: string; distance: number }> = [
+    { nodeId: source, distance: 0 },
+  ];
+  let reachedTarget: string | undefined;
   while (queue.length) {
     queue.sort((a, b) => a.distance - b.distance);
     const current = queue.shift()!;
     if (current.distance !== distances.get(current.nodeId)) continue;
-    if (current.nodeId === target) break;
+    if (targets.has(current.nodeId)) {
+      reachedTarget = current.nodeId;
+      break;
+    }
     for (const edge of graph.get(current.nodeId) ?? []) {
+      if (
+        options.blockedNodeIds?.has(edge.to) ||
+        options.excludedKinds?.has(edge.kind)
+      )
+        continue;
       const candidate = current.distance + edge.weight;
       if (candidate < (distances.get(edge.to) ?? Number.POSITIVE_INFINITY)) {
         distances.set(edge.to, candidate);
@@ -27,10 +57,16 @@ export function dijkstra(graph: Graph, source: string, target: string): Dijkstra
       }
     }
   }
-  const distance = distances.get(target);
-  if (distance === undefined) return null;
-  const nodeIds = [target]; const edges: GraphEdge[] = [];
-  while (nodeIds[0] !== source) { const item = previous.get(nodeIds[0]); if (!item) return null; edges.unshift(item.edge); nodeIds.unshift(item.nodeId); }
+  if (!reachedTarget) return null;
+  const distance = distances.get(reachedTarget)!;
+  const nodeIds = [reachedTarget];
+  const edges: GraphEdge[] = [];
+  while (nodeIds[0] !== source) {
+    const item = previous.get(nodeIds[0]);
+    if (!item) return null;
+    edges.unshift(item.edge);
+    nodeIds.unshift(item.nodeId);
+  }
   return { distance, nodeIds, edges };
 }
 
@@ -72,31 +108,284 @@ export class NavigationService {
   }
 
   async route(dto: CreateRouteDto) {
-    const [source, store] = await Promise.all([
-      this.prisma.node.findFirst({ where: { id: dto.fromNodeId, deletedAt: null }, include: { floor: { include: { building: { include: { tenant: true } } } } } }),
-      this.prisma.store.findFirst({ where: { id: dto.toStoreId, deletedAt: null, status: StoreStatus.ACTIVE }, include: { node: true, floor: { include: { building: { include: { tenant: true } } } } } }),
+    const mode = dto.mode ?? "NORMAL";
+    if (dto.toStoreId && dto.toNodeId)
+      throw new BadRequestException({
+        code: "AMBIGUOUS_ROUTE_TARGET",
+        message: "Provide either toStoreId or toNodeId, not both",
+      });
+    if (mode === "NORMAL" && !dto.toStoreId && !dto.toNodeId)
+      throw new BadRequestException({
+        code: "ROUTE_TARGET_REQUIRED",
+        message:
+          "A store or emergency exit target is required for normal routing",
+      });
+    const [source, store, requestedTarget] = await Promise.all([
+      this.prisma.node.findFirst({
+        where: { id: dto.fromNodeId, deletedAt: null },
+        include: {
+          floor: { include: { building: { include: { tenant: true } } } },
+        },
+      }),
+      dto.toStoreId
+        ? this.prisma.store.findFirst({
+            where: {
+              id: dto.toStoreId,
+              deletedAt: null,
+              status: StoreStatus.ACTIVE,
+            },
+            include: {
+              node: true,
+              floor: { include: { building: { include: { tenant: true } } } },
+            },
+          })
+        : Promise.resolve(null),
+      dto.toNodeId
+        ? this.prisma.node.findFirst({
+            where: { id: dto.toNodeId, deletedAt: null },
+            include: {
+              pois: { where: { category: PoiCategory.EXIT, deletedAt: null } },
+              floor: { include: { building: { include: { tenant: true } } } },
+            },
+          })
+        : Promise.resolve(null),
     ]);
-    if (!source || !store?.node || store.node.deletedAt) throw new NotFoundException({ code: 'ROUTE_ENDPOINT_NOT_FOUND', message: 'Route source or destination is not available' });
-    const target = store.node;
-    if (source.floor.buildingId !== store.floor.buildingId) throw new BadRequestException({ code: 'INVALID_ROUTE_SCOPE', message: 'Route endpoints must belong to the same building' });
+    if (
+      !source ||
+      (mode === "NORMAL" &&
+        dto.toStoreId &&
+        (!store?.node || store.node.deletedAt)) ||
+      (dto.toNodeId && !requestedTarget)
+    )
+      throw new NotFoundException({
+        code: "ROUTE_ENDPOINT_NOT_FOUND",
+        message: "Route source or destination is not available",
+      });
+    const requestedTargetIsExit =
+      (!!requestedTarget &&
+        ([NodeType.EXIT, NodeType.EMERGENCY_EXIT] as NodeType[]).includes(
+          requestedTarget.type,
+        )) ||
+      !!requestedTarget?.pois.length;
+    if (requestedTarget && !requestedTargetIsExit)
+      throw new BadRequestException({
+        code: "INVALID_EMERGENCY_EXIT",
+        message: "toNodeId must identify an EXIT or EMERGENCY_EXIT node",
+      });
+    const evacuation = mode === "EVACUATION" || requestedTargetIsExit;
+    const endpointFloor = requestedTarget?.floor ??
+      (!evacuation ? store?.floor : undefined);
+    if (endpointFloor && source.floor.buildingId !== endpointFloor.buildingId)
+      throw new BadRequestException({
+        code: "INVALID_ROUTE_SCOPE",
+        message: "Route endpoints must belong to the same building",
+      });
     const building = source.floor.building;
-    if (building.status !== BuildingStatus.ACTIVE || building.deletedAt || building.tenant.status !== TenantStatus.ACTIVE || building.tenant.archived || building.tenant.deletedAt || source.floor.publishStatus !== FloorPublishStatus.PUBLISHED || source.floor.deletedAt || store.floor.publishStatus !== FloorPublishStatus.PUBLISHED || store.floor.deletedAt) throw new NotFoundException({ code: 'ROUTE_NOT_PUBLISHED', message: 'Route endpoints must be published and available' });
-    const floors = await this.publishedFloors(building.id); const floorIds = floors.map(({ id }) => id);
-    const [nodes, edges, links] = await this.prisma.$transaction([
-      this.prisma.node.findMany({ where: { floorId: { in: floorIds }, deletedAt: null } }),
-      this.prisma.edge.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, status: EdgeStatus.ACTIVE, ...(dto.wheelchairMode ? { accessible: true } : {}) } }),
-      this.prisma.elevatorLink.findMany({ where: { buildingId: building.id, deletedAt: null } }),
+    if (
+      building.status !== BuildingStatus.ACTIVE ||
+      building.deletedAt ||
+      building.tenant.status !== TenantStatus.ACTIVE ||
+      building.tenant.archived ||
+      building.tenant.deletedAt ||
+      source.floor.publishStatus !== FloorPublishStatus.PUBLISHED ||
+      source.floor.deletedAt ||
+      (endpointFloor &&
+        (endpointFloor.publishStatus !== FloorPublishStatus.PUBLISHED ||
+          endpointFloor.deletedAt))
+    )
+      throw new NotFoundException({
+        code: "ROUTE_NOT_PUBLISHED",
+        message: "Route endpoints must be published and available",
+      });
+    const floors = await this.publishedFloors(building.id);
+    const floorIds = floors.map(({ id }) => id);
+    const [nodes, edges, links, exitPois] = await this.prisma.$transaction([
+      this.prisma.node.findMany({
+        where: { floorId: { in: floorIds }, deletedAt: null },
+      }),
+      this.prisma.edge.findMany({
+        where: {
+          floorId: { in: floorIds },
+          deletedAt: null,
+          status: EdgeStatus.ACTIVE,
+          ...(dto.wheelchairMode ? { accessible: true } : {}),
+        },
+      }),
+      this.prisma.elevatorLink.findMany({
+        where: { buildingId: building.id, deletedAt: null },
+      }),
+      this.prisma.poi.findMany({
+        where: {
+          floorId: { in: floorIds },
+          deletedAt: null,
+          category: PoiCategory.EXIT,
+        },
+        select: { nodeId: true },
+      }),
     ]);
-    const nodesById = new Map(nodes.map((node) => [node.id, node])); const graph: Graph = new Map(nodes.map((node) => [node.id, []]));
-    const add = (from: string, edge: GraphEdge) => { const list = graph.get(from); if (list) list.push(edge); };
-    for (const edge of edges) if (nodesById.has(edge.fromNodeId) && nodesById.has(edge.toNodeId)) { add(edge.fromNodeId, { to: edge.toNodeId, weight: edge.weight, kind: 'WALK' }); add(edge.toNodeId, { to: edge.fromNodeId, weight: edge.weight, kind: 'WALK' }); }
-    for (const link of links) { const from = nodesById.get(link.nodeIdFrom); const to = nodesById.get(link.nodeIdTo); if (from && to && from.floorId !== to.floorId) { add(from.id, { to: to.id, weight: this.elevatorWeight, kind: 'ELEVATOR' }); add(to.id, { to: from.id, weight: this.elevatorWeight, kind: 'ELEVATOR' }); } }
-    void this.analytics.enqueue({ eventType: 'ROUTE_REQUESTED', tenantId: building.tenantId, buildingId: building.id, floorId: source.floorId, context: { fromNodeId: source.id, toStoreId: store.id, wheelchairMode: dto.wheelchairMode } }).catch(() => undefined);
-    const result = dijkstra(graph, source.id, target.id); if (!result) { void this.analytics.enqueue({ eventType: 'ROUTE_NOT_FOUND', tenantId: building.tenantId, buildingId: building.id, floorId: source.floorId, context: { fromNodeId: source.id, toStoreId: store.id, wheelchairMode: dto.wheelchairMode, routeStatus: 'NO_ROUTE' } }).catch(() => undefined); throw new NotFoundException({ code: 'NO_ROUTE_FOUND', message: 'No available route was found' }); }
+    const blockedNodeIds = new Set([
+      ...(dto.hazardNodeIds ?? []),
+      ...(dto.blockedNodeIds ?? []),
+    ]);
+    const availableNodes = nodes.filter((node) => !blockedNodeIds.has(node.id));
+    const nodesById = new Map(nodes.map((node) => [node.id, node]));
+    const graph: Graph = new Map(availableNodes.map((node) => [node.id, []]));
+    const add = (from: string, edge: GraphEdge) => {
+      const list = graph.get(from);
+      if (list) list.push(edge);
+    };
+    for (const edge of edges)
+      if (
+        edge.status === EdgeStatus.ACTIVE &&
+        (!dto.wheelchairMode || edge.accessible) &&
+        graph.has(edge.fromNodeId) &&
+        graph.has(edge.toNodeId)
+      ) {
+        add(edge.fromNodeId, {
+          to: edge.toNodeId,
+          weight: edge.weight,
+          kind: "WALK",
+        });
+        add(edge.toNodeId, {
+          to: edge.fromNodeId,
+          weight: edge.weight,
+          kind: "WALK",
+        });
+      }
+    if (!evacuation)
+      for (const link of links) {
+        const from = nodesById.get(link.nodeIdFrom);
+        const to = nodesById.get(link.nodeIdTo);
+        if (
+          from &&
+          to &&
+          from.floorId !== to.floorId &&
+          graph.has(from.id) &&
+          graph.has(to.id)
+        ) {
+          add(from.id, {
+            to: to.id,
+            weight: this.elevatorWeight,
+            kind: "ELEVATOR",
+          });
+          add(to.id, {
+            to: from.id,
+            weight: this.elevatorWeight,
+            kind: "ELEVATOR",
+          });
+        }
+      }
+    const exitNodeIds = new Set(
+      [
+        ...nodes
+          .filter(
+            (node) =>
+              node.type === NodeType.EXIT ||
+              node.type === NodeType.EMERGENCY_EXIT,
+          )
+          .map((node) => node.id),
+        ...exitPois.map((poi) => poi.nodeId),
+      ].filter((nodeId) => graph.has(nodeId)),
+    );
+    const targetIds = evacuation
+      ? requestedTarget
+        ? new Set([requestedTarget.id])
+        : exitNodeIds
+      : new Set([store!.node!.id]);
+    const routeContext = {
+      fromNodeId: source.id,
+      toStoreId: store?.id ?? null,
+      toNodeId: requestedTarget?.id ?? null,
+      wheelchairMode: dto.wheelchairMode,
+      mode: evacuation ? "EVACUATION" : "NORMAL",
+      hazardNodeIds: [...blockedNodeIds],
+    };
+    void this.analytics
+      .enqueue({
+        eventType: "ROUTE_REQUESTED",
+        tenantId: building.tenantId,
+        buildingId: building.id,
+        floorId: source.floorId,
+        context: routeContext,
+      })
+      .catch(() => undefined);
+    const result = dijkstra(graph, source.id, targetIds, {
+      blockedNodeIds,
+      excludedKinds: evacuation ? new Set(["ELEVATOR"]) : undefined,
+    });
+    if (!result) {
+      void this.analytics
+        .enqueue({
+          eventType: "ROUTE_NOT_FOUND",
+          tenantId: building.tenantId,
+          buildingId: building.id,
+          floorId: source.floorId,
+          context: { ...routeContext, routeStatus: "NO_ROUTE" },
+        })
+        .catch(() => undefined);
+      throw new NotFoundException({
+        code: "NO_ROUTE_FOUND",
+        message: evacuation
+          ? "No safe emergency exit route was found"
+          : "No available route was found",
+      });
+    }
     const distanceMeters = result.distance / this.unitsPerMeter;
-    const steps = result.nodeIds.map((nodeId, index) => { const node = nodesById.get(nodeId)!; const edge = result.edges[index]; const next = edge ? nodesById.get(edge.to)! : undefined; const transition = edge?.kind === 'ELEVATOR' ? 'ELEVATOR' as const : undefined; const bearing = next && edge?.kind === 'WALK' ? (Math.atan2(next.y - node.y, next.x - node.x) * 180 / Math.PI + 360) % 360 : null; return { nodeId, floorId: node.floorId, x: node.x, y: node.y, bearing, ...(transition ? { transition, targetFloorId: next!.floorId, instruction: `Take the elevator to floor ${next!.floorId}` } : { instruction: next ? 'Continue to the next point' : 'You have arrived' }) }; });
-    const response = { totalDistance: distanceMeters, estimatedDurationSeconds: Math.max(1, Math.round(distanceMeters / this.walkingSpeed)), nodeIds: result.nodeIds, steps };
-    void this.analytics.enqueue({ eventType: 'ROUTE_RESOLVED', tenantId: building.tenantId, buildingId: building.id, floorId: source.floorId, context: { fromNodeId: source.id, toStoreId: store.id, wheelchairMode: dto.wheelchairMode, routeStatus: 'RESOLVED', totalDistance: distanceMeters } }).catch(() => undefined);
+    const steps = result.nodeIds.map((nodeId, index) => {
+      const node = nodesById.get(nodeId)!;
+      const edge = result.edges[index];
+      const next = edge ? nodesById.get(edge.to)! : undefined;
+      const transition =
+        edge?.kind === "ELEVATOR" ? ("ELEVATOR" as const) : undefined;
+      const bearing =
+        next && edge?.kind === "WALK"
+          ? ((Math.atan2(next.y - node.y, next.x - node.x) * 180) / Math.PI +
+              360) %
+            360
+          : null;
+      return {
+        nodeId,
+        floorId: node.floorId,
+        x: node.x,
+        y: node.y,
+        bearing,
+        ...(transition
+          ? {
+              transition,
+              targetFloorId: next!.floorId,
+              instruction: `Take the elevator to floor ${next!.floorId}`,
+            }
+          : {
+              instruction: next
+                ? "Continue to the next point"
+                : evacuation
+                  ? "You have reached a safe exit"
+                  : "You have arrived",
+            }),
+      };
+    });
+    const response = {
+      totalDistance: distanceMeters,
+      estimatedDurationSeconds: Math.max(
+        1,
+        Math.round(distanceMeters / this.walkingSpeed),
+      ),
+      nodeIds: result.nodeIds,
+      steps,
+    };
+    void this.analytics
+      .enqueue({
+        eventType: "ROUTE_RESOLVED",
+        tenantId: building.tenantId,
+        buildingId: building.id,
+        floorId: source.floorId,
+        context: {
+          ...routeContext,
+          routeStatus: "RESOLVED",
+          totalDistance: distanceMeters,
+        },
+      })
+      .catch(() => undefined);
     return response;
   }
 

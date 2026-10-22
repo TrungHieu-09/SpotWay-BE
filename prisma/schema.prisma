@@ -54,6 +54,8 @@ enum NodeType {
   STAIR
   ESCALATOR
   JUNCTION
+  EXIT
+  EMERGENCY_EXIT
 }
 
 enum EdgeStatus {

@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 
 export class PublicSearchQuery {
   @ApiPropertyOptional({ example: 'coffee', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) q?: string;
@@ -10,9 +10,48 @@ export class PublicSearchQuery {
 }
 
 export class CreateRouteDto {
-  @ApiProperty({ format: 'uuid' }) @IsUUID() fromNodeId!: string;
-  @ApiProperty({ format: 'uuid' }) @IsUUID() toStoreId!: string;
-  @ApiProperty({ example: false, default: false }) @IsBoolean() wheelchairMode!: boolean;
+  @ApiProperty({ format: "uuid" }) @IsUUID() fromNodeId!: string;
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Required for normal routes unless toNodeId is an emergency exit",
+  })
+  @IsOptional()
+  @IsUUID()
+  toStoreId?: string;
+  @ApiPropertyOptional({
+    format: "uuid",
+    description: "An explicit EXIT or EMERGENCY_EXIT node",
+  })
+  @IsOptional()
+  @IsUUID()
+  toNodeId?: string;
+  @ApiProperty({ example: false, default: false })
+  @IsBoolean()
+  wheelchairMode!: boolean;
+  @ApiPropertyOptional({ enum: ["NORMAL", "EVACUATION"], default: "NORMAL" })
+  @IsOptional()
+  @IsIn(["NORMAL", "EVACUATION"])
+  mode?: "NORMAL" | "EVACUATION";
+  @ApiPropertyOptional({
+    type: [String],
+    format: "uuid",
+    description: "Nodes affected by a dynamic hazard and excluded from routing",
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID("all", { each: true })
+  hazardNodeIds?: string[];
+  @ApiPropertyOptional({
+    type: [String],
+    format: "uuid",
+    deprecated: true,
+    description: "Alias for hazardNodeIds",
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID("all", { each: true })
+  blockedNodeIds?: string[];
 }
 
 export class PublicSearchResult {
