@@ -1,0 +1,6 @@
+import { BuildingStatus } from '@prisma/client';
+import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+export class CreateBuildingDto { @ApiProperty({ example: 'Demo Mall Building', maxLength: 100 }) @IsString() @MaxLength(100) name!: string; @ApiPropertyOptional({ example: '123 Demo Street', maxLength: 255 }) @IsOptional() @IsString() @MaxLength(255) address?: string; @ApiPropertyOptional({ description: 'Required only when an Admin creates a building', format: 'uuid' }) @IsOptional() @IsString() tenantId?: string; }
+export class UpdateBuildingDto { @ApiPropertyOptional({ example: 'Updated Mall Building', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) name?: string; @ApiPropertyOptional({ example: '456 New Street', maxLength: 255 }) @IsOptional() @IsString() @MaxLength(255) address?: string; @ApiPropertyOptional({ enum: BuildingStatus, example: BuildingStatus.ACTIVE }) @IsOptional() @IsEnum(BuildingStatus) status?: BuildingStatus; }
+export class BuildingResponse { @ApiProperty({ format: 'uuid' }) id!: string; @ApiProperty() tenantId!: string; @ApiProperty({ example: 'Demo Mall Building' }) name!: string; @ApiPropertyOptional() address?: string; @ApiProperty({ enum: BuildingStatus }) status!: BuildingStatus; }

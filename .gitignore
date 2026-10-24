@@ -1,0 +1,19 @@
+# Imported planning documents (kept local only)
+/business-rules-requirements.md
+/ke-hoach-4-tuan-indoor-navigation (1).md
+
+# Keep all Markdown documentation local
+*.md
+
+# Local planning documents under docs/
+/docs/**/*plan*.md
+
+# Local environment and generated artifacts
+.env
+dist/
+coverage/
+node_modules/
+__pycache__/
+services/floorplan-intelligence/.venv/
+services/floorplan-to-3d-api/.venv*/
+services/floorplan-intelligence/models/

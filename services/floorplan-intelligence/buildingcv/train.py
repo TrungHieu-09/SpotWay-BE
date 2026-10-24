@@ -1,0 +1,299 @@
+"""Training entrypoint. Resumes from any saved checkpoint; metrics.csv appends."""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import torch
+import torch.nn as nn
+import yaml
+from torch.utils.data import DataLoader, Subset
+
+from .data import CubiCasaDataset
+from .labels import CLASS_NAMES, NUM_CLASSES
+from .model import build_model
+
+
+class Tee:
+    """Print to stdout and append timestamped lines to a log file.
+
+    Stdout stays clean (just the message). The file gets `[HH:MM:SS +Ns]`
+    prefixes so we can see how long each phase took after the fact.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._f = path.open("a", buffering=1)  # line-buffered
+        self._start = datetime.now()
+
+    def __call__(self, msg: str = "") -> None:
+        print(msg)
+        ts = datetime.now().strftime("%H:%M:%S")
+        elapsed = (datetime.now() - self._start).total_seconds()
+        self._f.write(f"[{ts} +{elapsed:7.1f}s] {msg}\n")
+
+    def close(self) -> None:
+        self._f.close()
+
+
+def resolve_device(name: str) -> torch.device:
+    """Pick a device. "auto" prefers cuda, then mps, then cpu."""
+    if name != "auto":
+        return torch.device(name)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def make_run_dir(base: Path) -> Path:
+    """Timestamped subdirectory under `base`, created."""
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir = base / stamp
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def maybe_subset(ds, limit: int | None):
+    """Optionally cap a dataset to its first `limit` samples (for sanity runs)."""
+    if limit is None or limit >= len(ds):
+        return ds
+    return Subset(ds, range(limit))
+
+
+@torch.no_grad()
+def evaluate(model, loader, loss_fn, device) -> dict[str, Any]:
+    """Run validation and return loss, pixel accuracy, and per-class IoU.
+
+    IoU per class is computed from accumulated TP / FP / FN counts across the
+    full loader — not as a per-batch average — so each pixel weighs the same
+    regardless of which batch it landed in. Mean IoU (mIoU) is the unweighted
+    average across classes; it does NOT match pixel accuracy because it gives
+    each class equal weight regardless of how many pixels that class covers.
+    """
+    model.eval()
+    total_loss = 0.0
+    total_correct = 0
+    total_pixels = 0
+    tp = torch.zeros(NUM_CLASSES, dtype=torch.long, device=device)
+    fp = torch.zeros(NUM_CLASSES, dtype=torch.long, device=device)
+    fn = torch.zeros(NUM_CLASSES, dtype=torch.long, device=device)
+
+    for images, masks in loader:
+        images = images.to(device, non_blocking=True)
+        masks = masks.to(device, non_blocking=True)
+        logits = model(images)
+        loss = loss_fn(logits, masks)
+        total_loss += loss.item() * images.size(0)
+        preds = logits.argmax(dim=1)
+        total_correct += (preds == masks).sum().item()
+        total_pixels += masks.numel()
+        for c in range(NUM_CLASSES):
+            pred_c = preds == c
+            true_c = masks == c
+            tp[c] += (pred_c & true_c).sum()
+            fp[c] += (pred_c & ~true_c).sum()
+            fn[c] += (~pred_c & true_c).sum()
+
+    denom = (tp + fp + fn).clamp(min=1).float()
+    iou = (tp.float() / denom).cpu().tolist()
+    return {
+        "loss": total_loss / len(loader.dataset),
+        "pixel_acc": total_correct / total_pixels,
+        "iou": iou,
+        "miou": sum(iou) / len(iou),
+    }
+
+
+def format_iou(iou: list[float]) -> str:
+    """Render per-class IoU as `name 0.91 | name 0.15 | ...` for logging."""
+    return " | ".join(f"{name} {v:.3f}" for name, v in zip(CLASS_NAMES, iou))
+
+
+def append_metrics_row(csv_path: Path, epoch: int, train_loss: float, m: dict) -> None:
+    """One row per epoch into metrics.csv. Header is written once on creation."""
+    new = not csv_path.exists()
+    with csv_path.open("a", buffering=1) as f:
+        if new:
+            cols = ["epoch", "train_loss", "val_loss", "pixel_acc", "miou"] + [
+                f"iou_{n}" for n in CLASS_NAMES
+            ]
+            f.write(",".join(cols) + "\n")
+        row = [
+            str(epoch),
+            f"{train_loss:.6f}",
+            f"{m['loss']:.6f}",
+            f"{m['pixel_acc']:.6f}",
+            f"{m['miou']:.6f}",
+        ] + [f"{v:.6f}" for v in m["iou"]]
+        f.write(",".join(row) + "\n")
+
+
+def save_checkpoint(path: Path, *, epoch: int, model, optimizer, cfg, best_miou: float) -> None:
+    """Full state for resume: model + optimizer + epoch + best-so-far + config."""
+    torch.save(
+        {
+            "epoch": epoch,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "config": cfg,
+            "best_miou": best_miou,
+        },
+        path,
+    )
+
+
+def train(cfg: dict[str, Any], args: argparse.Namespace) -> None:
+    device = resolve_device(cfg["train"]["device"])
+
+    # Resume-vs-fresh-run setup. On resume we reuse the original run dir so
+    # logs and metrics.csv accumulate; otherwise we make a new timestamped one.
+    if args.resume is not None:
+        resume_path = Path(args.resume)
+        run_dir = resume_path.parent
+        # config.yaml + train.log already exist — append, don't clobber.
+    else:
+        run_dir = make_run_dir(Path(cfg["output"]["run_dir"]))
+        shutil.copy(args.config, run_dir / "config.yaml")
+
+    log = Tee(run_dir / "train.log")
+    log(f"device: {device}   run dir: {run_dir}")
+
+    H, W = cfg["data"]["image_size"]
+    data_dir = cfg["data"]["data_dir"]
+    normalize = cfg["data"]["normalize"]
+    letterbox = cfg["data"].get("letterbox", False)
+
+    train_ds = maybe_subset(
+        CubiCasaDataset(data_dir, "train", size=(H, W), normalize=normalize, letterbox=letterbox),
+        args.limit_train,
+    )
+    val_ds = maybe_subset(
+        CubiCasaDataset(data_dir, "val", size=(H, W), normalize=normalize, letterbox=letterbox),
+        args.limit_val,
+    )
+    log(f"train samples: {len(train_ds)}   val samples: {len(val_ds)}")
+
+    loader_kwargs = dict(
+        batch_size=cfg["optim"]["batch_size"],
+        num_workers=cfg["data"]["num_workers"],
+        pin_memory=(device.type == "cuda"),
+        persistent_workers=cfg["data"]["num_workers"] > 0,
+    )
+    train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
+
+    model = build_model(
+        encoder_name=cfg["model"]["encoder_name"],
+        encoder_weights=cfg["model"]["encoder_weights"],
+    ).to(device)
+    log(f"params: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M")
+
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=cfg["optim"]["lr"],
+        weight_decay=cfg["optim"]["weight_decay"],
+    )
+
+    # Restore from checkpoint if resuming. weights_only=False because the
+    # checkpoint embeds the cfg dict (not a pure tensor file).
+    start_epoch = 1
+    best_miou = 0.0
+    if args.resume is not None:
+        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        start_epoch = ckpt["epoch"] + 1
+        best_miou = ckpt.get("best_miou", 0.0)
+        log(f"resumed from {args.resume}: epoch {ckpt['epoch']} done, best mIoU {best_miou:.4f}")
+
+    epochs = args.epochs if args.epochs is not None else cfg["train"]["epochs"]
+    log_every = cfg["train"]["log_every"]
+    ckpt_every = cfg["train"].get("checkpoint_every", 0)
+    metrics_csv = run_dir / "metrics.csv"
+
+    for epoch in range(start_epoch, epochs + 1):
+        model.train()
+        running = 0.0          # loss sum since last log_every print
+        epoch_loss_sum = 0.0   # loss sum across the whole epoch (for CSV)
+        for step, (images, masks) in enumerate(train_loader, start=1):
+            images = images.to(device, non_blocking=True)
+            masks = masks.to(device, non_blocking=True)
+
+            logits = model(images)
+            loss = loss_fn(logits, masks)
+
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+
+            running += loss.item()
+            epoch_loss_sum += loss.item()
+            if step % log_every == 0:
+                log(f"  epoch {epoch} step {step}/{len(train_loader)}  train loss {running/log_every:.4f}")
+                running = 0.0
+
+        train_loss_avg = epoch_loss_sum / len(train_loader)
+
+        metrics = evaluate(model, val_loader, loss_fn, device)
+        log(
+            f"epoch {epoch} done — train loss {train_loss_avg:.4f}   "
+            f"val loss {metrics['loss']:.4f}   "
+            f"pixel acc {metrics['pixel_acc']:.4f}   mIoU {metrics['miou']:.4f}"
+        )
+        log(f"  per-class IoU: {format_iou(metrics['iou'])}")
+        append_metrics_row(metrics_csv, epoch, train_loss_avg, metrics)
+
+        is_best = metrics["miou"] > best_miou
+        if is_best:
+            best_miou = metrics["miou"]
+
+        # last.pt — overwritten every epoch, used for resume.
+        save_checkpoint(
+            run_dir / "last.pt",
+            epoch=epoch, model=model, optimizer=optimizer, cfg=cfg, best_miou=best_miou,
+        )
+        # best.pt — only when val mIoU improves; the model to use for inference.
+        if is_best:
+            save_checkpoint(
+                run_dir / "best.pt",
+                epoch=epoch, model=model, optimizer=optimizer, cfg=cfg, best_miou=best_miou,
+            )
+            log(f"  new best mIoU {best_miou:.4f} -> best.pt")
+        # epoch_NN.pt — every Nth epoch, so we can roll back to a specific point.
+        if ckpt_every > 0 and epoch % ckpt_every == 0:
+            save_checkpoint(
+                run_dir / f"epoch_{epoch:02d}.pt",
+                epoch=epoch, model=model, optimizer=optimizer, cfg=cfg, best_miou=best_miou,
+            )
+
+    log(f"done. last: {run_dir / 'last.pt'}   best: {run_dir / 'best.pt'} (mIoU {best_miou:.4f})")
+    log.close()
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", required=True, type=Path)
+    p.add_argument("--epochs", type=int, default=None, help="override cfg.train.epochs")
+    p.add_argument("--limit-train", type=int, default=None, help="cap train samples (debug)")
+    p.add_argument("--limit-val", type=int, default=None, help="cap val samples (debug)")
+    p.add_argument(
+        "--resume", type=Path, default=None,
+        help="path to a checkpoint (last.pt / best.pt / epoch_NN.pt). "
+             "Loads model+optimizer+epoch and continues into the same run dir.",
+    )
+    args = p.parse_args()
+
+    with open(args.config) as f:
+        cfg = yaml.safe_load(f)
+    train(cfg, args)
+
+
+if __name__ == "__main__":
+    main()
