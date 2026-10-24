@@ -13,6 +13,8 @@ import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 
+from app.navigation_graph import generate_navigation_draft
+
 MODEL_PATH = os.getenv("FLOORPLAN_MODEL_PATH", "models/stitch-unet.pth")
 PATCH_SIZE = 256
 PATCH_STRIDE = int(os.getenv("FLOORPLAN_TILE_STRIDE", "128"))
@@ -85,27 +87,21 @@ class NavigationAnalyzeRequest(AnalyzeRequest):
 
 
 def navigation_draft(image_bgr: np.ndarray) -> dict[str, Any]:
-    """Suggest a sparse walkable graph and possible stair zones.
+    """Suggest a sparse walkable graph (corridor centrelines) for manager review.
 
-    Suggestions are deliberately conservative and carry no authority: a
-    manager must confirm, move, delete or reclassify every proposed node
-    before it can become a live navigation graph.
+    Suggestions carry no authority: a manager must confirm, move, delete or
+    reclassify every proposed node before it can become a live navigation graph.
+    Geometry alone never yields EXIT / ELEVATOR / STAIR / ESCALATOR nodes or
+    shop names, so only NORMAL and JUNCTION candidates are produced.
     """
     structural = structural_floorplan(image_bgr)
     wall_mask = cv2.cvtColor(structural, cv2.COLOR_BGR2GRAY) < 128
-    height, width = wall_mask.shape
-    walkable = (~wall_mask).astype(np.uint8) * 255
-    safe_radius = max(3, round(min(height, width) * .006))
-    safe = cv2.erode(walkable, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (safe_radius * 2 + 1, safe_radius * 2 + 1)))
-
-    def is_safe(x: int, y: int) -> bool:
-        return 0 <= x < width and 0 <= y < height and safe[y, x] > 0
-
-    # A formatted architectural image contains no reliable shop identity.
-    # Never fabricate a dense grid of route nodes: the only valid generated
-    # nodes are confirmed entrance/vertical-transport symbols.  Manager adds
-    # a name and confirms each candidate before it becomes a graph endpoint.
-    return {"nodes": [], "edges": [], "warnings": ["Analyze điều hướng không tự đặt node lưới. Node chỉ được tạo tại cửa hàng/cửa ra vào, thang máy, cầu thang hoặc thang cuốn sau khi Manager xác nhận và đặt tên.", "Ảnh đã format bỏ chữ nên không thể biết tên cửa hàng; hãy đặt tên node tại đúng cửa trên Map Editor."], "image": {"width": width, "height": height}}
+    draft = generate_navigation_draft(wall_mask)
+    draft["warnings"].append(
+        "Đây là bản nháp đường tâm hành lang tự động, chưa phải lộ trình đã duyệt: hãy xoá nhánh không phù hợp, "
+        "đặt tên cửa hàng và chọn loại Node (cửa ra, thang máy, thang bộ...) trên Map Editor."
+    )
+    return draft
 
 
 def tile_positions(length: int) -> list[int]:

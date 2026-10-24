@@ -5,6 +5,16 @@ import { TenantAccessService } from '../common/tenant-access.service';
 import { PrismaService } from '../database/prisma.service';
 import { ApplyNavigationDraftDto, CreateEdgeDto, CreateElevatorLinkDto, CreateNodeDto, CreatePoiDto, UpdateEdgeDto, UpdateNodeDto, UpdatePoiDto } from './graph.dto';
 
+const DRAFT_REPLAY_TTL_MS = 10 * 60 * 1000;
+
+export type NavigationDraftApplyResult = {
+  nodesCreated: number;
+  edgesCreated: number;
+  nodeIds: Record<string, string>;
+  edgeIds: Record<string, string>;
+  replayed: boolean;
+};
+
 @Injectable()
 export class GraphService {
   constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService) {}
@@ -49,26 +59,64 @@ export class GraphService {
   async createElevatorLink(user: AuthUser, buildingId: string, dto: CreateElevatorLinkDto) { const building = await this.access.building(user, buildingId); if (dto.nodeIdFrom === dto.nodeIdTo) throw new BadRequestException({ code: 'INVALID_ELEVATOR_LINK', message: 'Elevator link requires two different nodes' }); const nodes = await this.prisma.node.findMany({ where: { id: { in: [dto.nodeIdFrom, dto.nodeIdTo] }, deletedAt: null }, include: { floor: true } }); if (nodes.length !== 2 || nodes.some((node) => node.type !== NodeType.ELEVATOR || node.floor.deletedAt || node.floor.buildingId !== buildingId || node.tenantId !== building.tenantId) || nodes[0].floorId === nodes[1].floorId) throw new BadRequestException({ code: 'INVALID_ELEVATOR_LINK', message: 'Elevator nodes must be on different floors in this building' }); const [nodeLowId, nodeHighId] = this.pair(dto.nodeIdFrom, dto.nodeIdTo); const duplicate = await this.prisma.elevatorLink.findFirst({ where: { buildingId, nodeLowId, nodeHighId, deletedAt: null } }); if (duplicate) throw new ConflictException({ code: 'DUPLICATE_ELEVATOR_LINK', message: 'This elevator link already exists' }); return this.prisma.elevatorLink.create({ data: { tenantId: building.tenantId, buildingId, nodeIdFrom: dto.nodeIdFrom, nodeIdTo: dto.nodeIdTo, nodeLowId, nodeHighId } }); }
   async deleteElevatorLink(user: AuthUser, id: string) { const link = await this.prisma.elevatorLink.findFirst({ where: { id, deletedAt: null } }); if (!link) throw new NotFoundException({ code: 'ELEVATOR_LINK_NOT_FOUND', message: 'Elevator link not found' }); await this.access.building(user, link.buildingId); return this.prisma.elevatorLink.update({ where: { id }, data: { deletedAt: new Date() } }); }
 
-  async applyNavigationDraft(user: AuthUser, floorId: string, dto: ApplyNavigationDraftDto) {
+  private readonly appliedDrafts = new Map<string, { at: number; result: Promise<NavigationDraftApplyResult> }>();
+
+  /**
+   * Apply the confirmed subgraph. Weights are always recomputed from node coordinates.
+   * `draftId` makes retries/double-clicks idempotent (per process, 10 minutes).
+   */
+  async applyNavigationDraft(user: AuthUser, floorId: string, dto: ApplyNavigationDraftDto): Promise<NavigationDraftApplyResult> {
     const floor = await this.floor(user, floorId);
+    const key = dto.draftId ? `${floorId}:${dto.draftId}` : undefined;
+    const now = Date.now();
+    for (const [stored, entry] of this.appliedDrafts) if (now - entry.at > DRAFT_REPLAY_TTL_MS) this.appliedDrafts.delete(stored);
+    const previous = key ? this.appliedDrafts.get(key) : undefined;
+    if (previous) return { ...(await previous.result), replayed: true };
+    const result = this.createNavigationDraftGraph(floor, dto);
+    if (key) {
+      this.appliedDrafts.set(key, { at: now, result });
+      result.catch(() => this.appliedDrafts.delete(key));
+    }
+    return result;
+  }
+
+  private async createNavigationDraftGraph(floor: { id: string; tenantId: string; mapWidth: number | null; mapHeight: number | null }, dto: ApplyNavigationDraftDto): Promise<NavigationDraftApplyResult> {
     const accepted = dto.nodes.filter((node) => node.confirmed !== false);
     if (!accepted.length) throw new BadRequestException({ code: 'NAVIGATION_DRAFT_EMPTY', message: 'Confirm at least one suggested node before applying the draft' });
+    if (new Set(accepted.map((node) => node.id)).size !== accepted.length) throw new BadRequestException({ code: 'DRAFT_DUPLICATE_NODE', message: 'Draft node ids must be unique' });
     accepted.forEach((node) => this.coordinate(floor, node.x, node.y));
+    const acceptedIds = new Set(accepted.map((node) => node.id));
+    const edges = dto.edges.filter((edge) => edge.confirmed !== false);
+    const seenEdgeIds = new Set<string>();
+    const seenPairs = new Set<string>();
+    for (const edge of edges) {
+      // Reject instead of silently skipping so UI bugs stay visible.
+      if (!acceptedIds.has(edge.fromNodeId) || !acceptedIds.has(edge.toNodeId)) throw new BadRequestException({ code: 'DRAFT_EDGE_ENDPOINT_MISSING', message: 'Every applied edge must connect two confirmed nodes', edgeId: edge.id });
+      if (edge.fromNodeId === edge.toNodeId) throw new BadRequestException({ code: 'DRAFT_EDGE_SELF_LOOP', message: 'An edge cannot connect a node to itself', edgeId: edge.id });
+      const pair = [edge.fromNodeId, edge.toNodeId].sort().join('\u0000');
+      if (seenEdgeIds.has(edge.id) || seenPairs.has(pair)) throw new BadRequestException({ code: 'DRAFT_DUPLICATE_EDGE', message: 'Draft edges must be unique', edgeId: edge.id });
+      seenEdgeIds.add(edge.id);
+      seenPairs.add(pair);
+    }
     return this.prisma.$transaction(async (tx) => {
-      const ids = new Map<string, string>();
+      const nodeIds: Record<string, string> = {};
+      const coordinates = new Map<string, { x: number; y: number }>();
       for (const proposal of accepted) {
-        const node = await tx.node.create({ data: { floorId, tenantId: floor.tenantId, x: proposal.x, y: proposal.y, name: proposal.name?.trim() || null, type: proposal.type, accessible: proposal.accessible ?? true } });
-        ids.set(proposal.id, node.id);
+        const node = await tx.node.create({ data: { floorId: floor.id, tenantId: floor.tenantId, x: proposal.x, y: proposal.y, name: proposal.name?.trim() || null, type: proposal.type, accessible: proposal.accessible ?? true } });
+        nodeIds[proposal.id] = node.id;
+        coordinates.set(proposal.id, { x: node.x, y: node.y });
       }
-      let edgeCount = 0;
-      for (const proposal of dto.edges.filter((edge) => edge.confirmed !== false)) {
-        const fromNodeId = ids.get(proposal.fromNodeId); const toNodeId = ids.get(proposal.toNodeId);
-        if (!fromNodeId || !toNodeId || fromNodeId === toNodeId) continue;
+      const edgeIds: Record<string, string> = {};
+      for (const proposal of edges) {
+        const fromNodeId = nodeIds[proposal.fromNodeId];
+        const toNodeId = nodeIds[proposal.toNodeId];
+        const from = coordinates.get(proposal.fromNodeId)!;
+        const to = coordinates.get(proposal.toNodeId)!;
         const [nodeLowId, nodeHighId] = this.pair(fromNodeId, toNodeId);
-        const [from, to] = await Promise.all([tx.node.findUniqueOrThrow({ where: { id: fromNodeId } }), tx.node.findUniqueOrThrow({ where: { id: toNodeId } })]);
-        await tx.edge.create({ data: { tenantId: floor.tenantId, floorId, fromNodeId, toNodeId, nodeLowId, nodeHighId, weight: Math.hypot(from.x - to.x, from.y - to.y), accessible: proposal.accessible ?? true } }); edgeCount++;
+        const edge = await tx.edge.create({ data: { tenantId: floor.tenantId, floorId: floor.id, fromNodeId, toNodeId, nodeLowId, nodeHighId, weight: Math.hypot(from.x - to.x, from.y - to.y), accessible: proposal.accessible ?? true } });
+        edgeIds[proposal.id] = edge.id;
       }
-      return { nodesCreated: ids.size, edgesCreated: edgeCount };
+      return { nodesCreated: accepted.length, edgesCreated: edges.length, nodeIds, edgeIds, replayed: false };
     });
   }
 

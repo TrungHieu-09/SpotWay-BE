@@ -1,7 +1,10 @@
-import { BadGatewayException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Floor, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { parseNavigationAnalysis } from './navigation-draft';
 import { StorageService } from './storage.service';
+
+const MAX_UPSTREAM_BYTES = 2 * 1024 * 1024;
 
 type FloorPlanAnalysis = {
   engine: { name: string; model: string; version: string };
@@ -17,6 +20,7 @@ type FloorPlanAnalysis = {
 
 @Injectable()
 export class FloorplanIntelligenceService {
+  private readonly logger = new Logger(FloorplanIntelligenceService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -67,6 +71,9 @@ export class FloorplanIntelligenceService {
     if (!floor.mapImageUrl) {
       throw new BadGatewayException({ code: 'FLOOR_PLAN_MISSING', message: 'Upload a floor-plan image before requesting navigation analysis' });
     }
+    if (!floor.mapWidth || !floor.mapHeight || floor.mapWidth <= 0 || floor.mapHeight <= 0) {
+      throw new BadRequestException({ code: 'FLOOR_MAP_DIMENSIONS_REQUIRED', message: 'Set the floor map width and height before requesting navigation analysis' });
+    }
     const serviceUrl = process.env.FLOORPLAN_INTELLIGENCE_URL?.replace(/\/$/, '');
     if (!serviceUrl) {
       throw new ServiceUnavailableException({ code: 'FLOORPLAN_INTELLIGENCE_UNAVAILABLE', message: 'Floor-plan intelligence service is not configured' });
@@ -84,28 +91,18 @@ export class FloorplanIntelligenceService {
     } catch {
       throw new ServiceUnavailableException({ code: 'FLOORPLAN_INTELLIGENCE_UNAVAILABLE', message: 'Navigation analysis service did not respond' });
     }
-    const body = await response.json().catch(() => ({})) as { detail?: string; nodes?: unknown[]; edges?: unknown[] };
-    if (!response.ok) {
-      throw new BadGatewayException({ code: 'NAVIGATION_ANALYSIS_FAILED', message: body.detail || 'Navigation analysis failed' });
-    }
-    if (!Array.isArray(body.nodes) || !Array.isArray(body.edges)) {
+    // Cap the upstream payload before parsing; detail from a failed upstream call is logged, never returned.
+    const raw = await response.text().catch(() => '');
+    if (raw.length > MAX_UPSTREAM_BYTES) {
       throw new BadGatewayException({ code: 'NAVIGATION_ANALYSIS_INVALID', message: 'Navigation analysis returned an invalid draft' });
     }
-    const source = body as { image?: { width?: number; height?: number }; nodes: Array<Record<string, unknown>>; edges: unknown[] };
-    const sourceWidth = source.image?.width || floor.mapWidth || 1;
-    const sourceHeight = source.image?.height || floor.mapHeight || 1;
-    const targetWidth = floor.mapWidth || sourceWidth;
-    const targetHeight = floor.mapHeight || sourceHeight;
-    // AI emits percentages so it is resolution-independent.  Map editor nodes
-    // use map pixels; convert once at the boundary so draft and real nodes are
-    // editable with exactly the same coordinate system.
-    const nodes = source.nodes.map((node) => ({
-      ...node,
-      x: Number(node.x) / 100 * targetWidth,
-      y: Number(node.y) / 100 * targetHeight,
-      name: null,
-    }));
-    return { ...source, nodes, edges: source.edges };
+    let body: unknown;
+    try { body = JSON.parse(raw); } catch { body = undefined; }
+    if (!response.ok) {
+      this.logger.warn(`navigation-analyze failed for floor ${floor.id}: HTTP ${response.status}`);
+      throw new BadGatewayException({ code: 'NAVIGATION_ANALYSIS_FAILED', message: 'Navigation analysis failed' });
+    }
+    return parseNavigationAnalysis(body, floor);
   }
 
   latest(floorId: string) {

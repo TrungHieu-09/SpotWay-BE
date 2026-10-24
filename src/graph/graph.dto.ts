@@ -1,7 +1,7 @@
 import { EdgeStatus, NodeType, PoiCategory } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateNested } from 'class-validator';
 
 export class CreateNodeDto {
   @ApiProperty({ example: 240.5 }) @IsNumber() x!: number;
@@ -44,7 +44,7 @@ export class CreateElevatorLinkDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() nodeIdTo!: string;
 }
 export class NavigationDraftNodeDto {
-  @IsString() id!: string;
+  @IsString() @MinLength(1) @MaxLength(100) id!: string;
   @IsNumber() x!: number;
   @IsNumber() y!: number;
   @IsOptional() @IsString() @MaxLength(100) name?: string | null;
@@ -53,15 +53,27 @@ export class NavigationDraftNodeDto {
   @IsOptional() @IsBoolean() confirmed?: boolean;
 }
 export class NavigationDraftEdgeDto {
-  @IsString() id!: string;
-  @IsString() fromNodeId!: string;
-  @IsString() toNodeId!: string;
+  @IsString() @MinLength(1) @MaxLength(100) id!: string;
+  @IsString() @MinLength(1) @MaxLength(100) fromNodeId!: string;
+  @IsString() @MinLength(1) @MaxLength(100) toNodeId!: string;
   @IsOptional() @IsBoolean() accessible?: boolean;
   @IsOptional() @IsBoolean() confirmed?: boolean;
 }
 export class ApplyNavigationDraftDto {
-  @IsArray() @ValidateNested({ each: true }) @Type(() => NavigationDraftNodeDto) nodes!: NavigationDraftNodeDto[];
-  @IsArray() @ValidateNested({ each: true }) @Type(() => NavigationDraftEdgeDto) edges!: NavigationDraftEdgeDto[];
+  @ApiPropertyOptional({ format: 'uuid', description: 'Client-generated id; repeating it for the same floor returns the first result instead of creating duplicates' })
+  @IsOptional() @IsUUID() draftId?: string;
+  @ApiPropertyOptional({ enum: ['APPEND'], default: 'APPEND', description: 'Only APPEND is supported: applied nodes/edges are added next to the existing graph' })
+  @IsOptional() @IsIn(['APPEND']) mode?: 'APPEND';
+  @IsArray() @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => NavigationDraftNodeDto) nodes!: NavigationDraftNodeDto[];
+  @IsArray() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => NavigationDraftEdgeDto) edges!: NavigationDraftEdgeDto[];
+}
+
+export class NavigationDraftApplyResponse {
+  @ApiProperty({ example: 12 }) nodesCreated!: number;
+  @ApiProperty({ example: 11 }) edgesCreated!: number;
+  @ApiProperty({ type: 'object', additionalProperties: { type: 'string', format: 'uuid' }, description: 'draft node id -> persisted node id' }) nodeIds!: Record<string, string>;
+  @ApiProperty({ type: 'object', additionalProperties: { type: 'string', format: 'uuid' }, description: 'draft edge id -> persisted edge id' }) edgeIds!: Record<string, string>;
+  @ApiProperty({ example: false, description: 'true when draftId was already applied and this is the stored first result' }) replayed!: boolean;
 }
 
 export class NodeResponse {
