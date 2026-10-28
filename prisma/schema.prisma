@@ -63,6 +63,12 @@ enum EdgeStatus {
   BLOCKED
 }
 
+enum ConnectorKind {
+  ELEVATOR
+  STAIR
+  ESCALATOR
+}
+
 enum PoiCategory {
   RESTROOM
   ELEVATOR
@@ -148,6 +154,7 @@ model Building {
   floors             Floor[]
   assignments        StaffAssignment[]
   elevatorLinks      ElevatorLink[]
+  connectors         Connector[]
   qrAnchors          QrAnchor[]
   defaultFloorHeight Float             @default(4) @map("default_floor_height")
 
@@ -167,26 +174,30 @@ model StaffAssignment {
 }
 
 model Floor {
-  id            String             @id @default(uuid())
-  tenantId      String             @map("tenant_id")
-  buildingId    String             @map("building_id")
-  floorNumber   Int                @map("floor_number")
-  name          String
-  mapImageUrl   String?            @map("map_image_url")
-  mapWidth      Int?               @map("map_width")
-  mapHeight     Int?               @map("map_height")
-  publishStatus FloorPublishStatus @default(DRAFT) @map("publish_status")
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
-  deletedAt     DateTime?          @map("deleted_at")
-  building      Building           @relation(fields: [buildingId], references: [id])
-  nodes         Node[]
-  edges         Edge[]
-  pois          Poi[]
-  stores        Store[]
-  qrAnchors     QrAnchor[]
-  mapRevisions  FloorMapRevision[]
-  elevation     Float?
+  id                String                  @id @default(uuid())
+  tenantId          String                  @map("tenant_id")
+  buildingId        String                  @map("building_id")
+  floorNumber       Int                     @map("floor_number")
+  name              String
+  mapImageUrl       String?                 @map("map_image_url")
+  mapWidth          Int?                    @map("map_width")
+  mapHeight         Int?                    @map("map_height")
+  publishStatus     FloorPublishStatus      @default(DRAFT) @map("publish_status")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+  deletedAt         DateTime?               @map("deleted_at")
+  building          Building                @relation(fields: [buildingId], references: [id])
+  nodes             Node[]
+  edges             Edge[]
+  pois              Poi[]
+  stores            Store[]
+  qrAnchors         QrAnchor[]
+  mapRevisions      FloorMapRevision[]
+  elevation         Float?
+  metersPerPixel    Float?                  @map("meters_per_pixel")
+  graphVersion      Int                     @default(0) @map("graph_version")
+  connectorStops    ConnectorStop[]
+  draftApplications GraphDraftApplication[]
 
   @@index([buildingId, floorNumber])
   @@index([tenantId, buildingId, deletedAt])
@@ -213,50 +224,60 @@ model Node {
   elevatorLinksFrom ElevatorLink[] @relation("ElevatorLinkFrom")
   elevatorLinksTo   ElevatorLink[] @relation("ElevatorLinkTo")
   qrAnchors         QrAnchor[]
+  connectorStop     ConnectorStop?
 
+  @@unique([id, floorId])
   @@index([tenantId, floorId, deletedAt])
   @@index([floorId, name])
+  @@index([floorId, type])
   @@map("nodes")
 }
 
 model Edge {
-  id         String     @id @default(uuid())
-  tenantId   String     @map("tenant_id")
-  floorId    String     @map("floor_id")
-  fromNodeId String     @map("from_node_id")
-  toNodeId   String     @map("to_node_id")
-  nodeLowId  String     @map("node_low_id")
-  nodeHighId String     @map("node_high_id")
-  weight     Float
-  accessible Boolean    @default(true)
-  status     EdgeStatus @default(ACTIVE)
-  createdAt  DateTime   @default(now()) @map("created_at")
-  updatedAt  DateTime   @updatedAt @map("updated_at")
-  deletedAt  DateTime?  @map("deleted_at")
-  floor      Floor      @relation(fields: [floorId], references: [id])
-  fromNode   Node       @relation("EdgeFrom", fields: [fromNodeId], references: [id], onDelete: Restrict)
-  toNode     Node       @relation("EdgeTo", fields: [toNodeId], references: [id], onDelete: Restrict)
+  id           String     @id @default(uuid())
+  tenantId     String     @map("tenant_id")
+  floorId      String     @map("floor_id")
+  fromNodeId   String     @map("from_node_id")
+  toNodeId     String     @map("to_node_id")
+  nodeLowId    String     @map("node_low_id")
+  nodeHighId   String     @map("node_high_id")
+  weight       Float
+  weightMeters Float?     @map("weight_meters")
+  accessible   Boolean    @default(true)
+  status       EdgeStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  deletedAt    DateTime?  @map("deleted_at")
+  floor        Floor      @relation(fields: [floorId], references: [id])
+  fromNode     Node       @relation("EdgeFrom", fields: [fromNodeId, floorId], references: [id, floorId], onDelete: Restrict)
+  toNode       Node       @relation("EdgeTo", fields: [toNodeId, floorId], references: [id, floorId], onDelete: Restrict)
 
   @@index([tenantId, floorId, deletedAt])
   @@index([floorId, nodeLowId, nodeHighId])
+  @@index([fromNodeId])
+  @@index([toNodeId])
   @@map("edges")
 }
 
 model Poi {
-  id        String      @id @default(uuid())
-  tenantId  String      @map("tenant_id")
-  floorId   String      @map("floor_id")
-  nodeId    String      @map("node_id")
-  name      String
-  category  PoiCategory
-  icon      String?
-  createdAt DateTime    @default(now()) @map("created_at")
-  updatedAt DateTime    @updatedAt @map("updated_at")
-  deletedAt DateTime?   @map("deleted_at")
-  floor     Floor       @relation(fields: [floorId], references: [id])
-  node      Node        @relation(fields: [nodeId], references: [id])
+  id                 String      @id @default(uuid())
+  tenantId           String      @map("tenant_id")
+  floorId            String      @map("floor_id")
+  nodeId             String      @map("node_id")
+  name               String
+  category           PoiCategory
+  icon               String?
+  x                  Float?
+  y                  Float?
+  snapDistanceMeters Float?      @map("snap_distance_meters")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  deletedAt          DateTime?   @map("deleted_at")
+  floor              Floor       @relation(fields: [floorId], references: [id])
+  node               Node        @relation(fields: [nodeId], references: [id])
 
   @@index([tenantId, floorId, deletedAt])
+  @@index([nodeId])
   @@map("pois")
 }
 
@@ -280,6 +301,7 @@ model Store {
   promotions  Promotion[]
 
   @@index([tenantId, floorId, deletedAt])
+  @@index([nodeId])
   @@map("stores")
 }
 
@@ -299,6 +321,54 @@ model ElevatorLink {
 
   @@index([buildingId, nodeLowId, nodeHighId])
   @@map("elevator_links")
+}
+
+/// A vertical transport (elevator/stair/escalator) serving N floors of one building.
+model Connector {
+  id         String          @id @default(uuid())
+  tenantId   String          @map("tenant_id")
+  buildingId String          @map("building_id")
+  kind       ConnectorKind
+  name       String
+  accessible Boolean         @default(true)
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+  deletedAt  DateTime?       @map("deleted_at")
+  building   Building        @relation(fields: [buildingId], references: [id])
+  stops      ConnectorStop[]
+
+  @@index([buildingId, deletedAt])
+  @@index([tenantId, deletedAt])
+  @@map("connectors")
+}
+
+/// One stop of a connector on one floor. (nodeId, floorId) is a composite FK so a stop's node always lies on its floor.
+model ConnectorStop {
+  id          String    @id @default(uuid())
+  connectorId String    @map("connector_id")
+  floorId     String    @map("floor_id")
+  nodeId      String    @unique @map("node_id")
+  connector   Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  floor       Floor     @relation(fields: [floorId], references: [id])
+  node        Node      @relation(fields: [nodeId, floorId], references: [id, floorId], onDelete: Restrict)
+
+  @@unique([connectorId, floorId])
+  @@unique([nodeId, floorId])
+  @@index([floorId])
+  @@map("connector_stops")
+}
+
+/// Durable idempotency record for navigation-draft application (replaces the in-process replay map).
+model GraphDraftApplication {
+  id        String   @id @default(uuid())
+  floorId   String   @map("floor_id")
+  draftId   String   @map("draft_id")
+  result    Json
+  createdAt DateTime @default(now()) @map("created_at")
+  floor     Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  @@unique([floorId, draftId])
+  @@map("graph_draft_applications")
 }
 
 model Promotion {
@@ -337,6 +407,7 @@ model QrAnchor {
 
   @@index([buildingId, nodeId, deletedAt])
   @@index([tenantId, deletedAt])
+  @@index([nodeId])
   @@map("qr_anchors")
 }
 

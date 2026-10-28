@@ -1,81 +1,21 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { BuildingStatus, EdgeStatus, FloorPublishStatus, NodeType, PoiCategory, StoreStatus, TenantStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BuildingStatus, FloorPublishStatus, NodeType, PoiCategory, StoreStatus, TenantStatus } from '@prisma/client';
 import { pageMeta } from '../common/pagination';
 import { PrismaService } from '../database/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { GraphCacheService } from '../graph/application/graph-cache.service';
+import { GRAPH_ERROR_CODES } from '../graph/domain/graph.types';
+import { planRoute } from '../graph/domain/pathfinding/route-planner';
 import { CreateRouteDto, PublicSearchQuery } from './navigation.dto';
-
-export type GraphEdge = {
-  to: string;
-  weight: number;
-  kind: "WALK" | "ELEVATOR";
-};
-export type Graph = Map<string, GraphEdge[]>;
-export type DijkstraResult = {
-  distance: number;
-  nodeIds: string[];
-  edges: GraphEdge[];
-} | null;
-export type DijkstraOptions = {
-  blockedNodeIds?: ReadonlySet<string>;
-  excludedKinds?: ReadonlySet<GraphEdge["kind"]>;
-};
-
-export function dijkstra(
-  graph: Graph,
-  source: string,
-  target: string | ReadonlySet<string>,
-  options: DijkstraOptions = {},
-): DijkstraResult {
-  const targets = typeof target === "string" ? new Set([target]) : target;
-  if (!targets.size || options.blockedNodeIds?.has(source)) return null;
-  const distances = new Map<string, number>([[source, 0]]);
-  const previous = new Map<string, { nodeId: string; edge: GraphEdge }>();
-  const queue: Array<{ nodeId: string; distance: number }> = [
-    { nodeId: source, distance: 0 },
-  ];
-  let reachedTarget: string | undefined;
-  while (queue.length) {
-    queue.sort((a, b) => a.distance - b.distance);
-    const current = queue.shift()!;
-    if (current.distance !== distances.get(current.nodeId)) continue;
-    if (targets.has(current.nodeId)) {
-      reachedTarget = current.nodeId;
-      break;
-    }
-    for (const edge of graph.get(current.nodeId) ?? []) {
-      if (
-        options.blockedNodeIds?.has(edge.to) ||
-        options.excludedKinds?.has(edge.kind)
-      )
-        continue;
-      const candidate = current.distance + edge.weight;
-      if (candidate < (distances.get(edge.to) ?? Number.POSITIVE_INFINITY)) {
-        distances.set(edge.to, candidate);
-        previous.set(edge.to, { nodeId: current.nodeId, edge });
-        queue.push({ nodeId: edge.to, distance: candidate });
-      }
-    }
-  }
-  if (!reachedTarget) return null;
-  const distance = distances.get(reachedTarget)!;
-  const nodeIds = [reachedTarget];
-  const edges: GraphEdge[] = [];
-  while (nodeIds[0] !== source) {
-    const item = previous.get(nodeIds[0]);
-    if (!item) return null;
-    edges.unshift(item.edge);
-    nodeIds.unshift(item.nodeId);
-  }
-  return { distance, nodeIds, edges };
-}
 
 @Injectable()
 export class NavigationService {
-  constructor(private readonly prisma: PrismaService, private readonly analytics: AnalyticsService) {}
-  private readonly elevatorWeight = Number(process.env.ELEVATOR_TRANSITION_WEIGHT ?? 20);
-  private readonly unitsPerMeter = Number(process.env.MAP_UNITS_PER_METER ?? 1);
+  constructor(private readonly prisma: PrismaService, private readonly analytics: AnalyticsService, private readonly graphCache: GraphCacheService) {}
   private readonly walkingSpeed = Number(process.env.ROUTE_WALKING_SPEED_MPS ?? 1.2);
+
+  private notCalibrated(floorIds: string[]) {
+    return new ConflictException({ code: GRAPH_ERROR_CODES.FLOOR_NOT_CALIBRATED, message: 'Floor scale is not calibrated yet; set it with PATCH /floors/:id/calibration', floorIds });
+  }
 
   private activeBuildingWhere(id: string) { return { id, status: BuildingStatus.ACTIVE, deletedAt: null, tenant: { is: { status: TenantStatus.ACTIVE, archived: false, deletedAt: null } } }; }
   private async activeBuilding(id: string) { const building = await this.prisma.building.findFirst({ where: this.activeBuildingWhere(id) }); if (!building) throw new NotFoundException({ code: 'PUBLIC_BUILDING_NOT_FOUND', message: 'Published building not found' }); return building; }
@@ -197,100 +137,17 @@ export class NavigationService {
         code: "ROUTE_NOT_PUBLISHED",
         message: "Route endpoints must be published and available",
       });
-    const floors = await this.publishedFloors(building.id);
-    const floorIds = floors.map(({ id }) => id);
-    const [nodes, edges, links, exitPois] = await this.prisma.$transaction([
-      this.prisma.node.findMany({
-        where: { floorId: { in: floorIds }, deletedAt: null },
-      }),
-      this.prisma.edge.findMany({
-        where: {
-          floorId: { in: floorIds },
-          deletedAt: null,
-          status: EdgeStatus.ACTIVE,
-          ...(dto.wheelchairMode ? { accessible: true } : {}),
-        },
-      }),
-      this.prisma.elevatorLink.findMany({
-        where: { buildingId: building.id, deletedAt: null },
-      }),
-      this.prisma.poi.findMany({
-        where: {
-          floorId: { in: floorIds },
-          deletedAt: null,
-          category: PoiCategory.EXIT,
-        },
-        select: { nodeId: true },
-      }),
-    ]);
+    const snapshot = await this.graphCache.get(building.id);
+    const uncalibratedEndpoints = [source.floorId, endpointFloor?.id].filter((floorId): floorId is string => !!floorId && snapshot.uncalibratedFloorIds.includes(floorId));
+    if (uncalibratedEndpoints.length) throw this.notCalibrated(uncalibratedEndpoints);
     const blockedNodeIds = new Set([
       ...(dto.hazardNodeIds ?? []),
       ...(dto.blockedNodeIds ?? []),
     ]);
-    const availableNodes = nodes.filter((node) => !blockedNodeIds.has(node.id));
-    const nodesById = new Map(nodes.map((node) => [node.id, node]));
-    const graph: Graph = new Map(availableNodes.map((node) => [node.id, []]));
-    const add = (from: string, edge: GraphEdge) => {
-      const list = graph.get(from);
-      if (list) list.push(edge);
-    };
-    for (const edge of edges)
-      if (
-        edge.status === EdgeStatus.ACTIVE &&
-        (!dto.wheelchairMode || edge.accessible) &&
-        graph.has(edge.fromNodeId) &&
-        graph.has(edge.toNodeId)
-      ) {
-        add(edge.fromNodeId, {
-          to: edge.toNodeId,
-          weight: edge.weight,
-          kind: "WALK",
-        });
-        add(edge.toNodeId, {
-          to: edge.fromNodeId,
-          weight: edge.weight,
-          kind: "WALK",
-        });
-      }
-    if (!evacuation)
-      for (const link of links) {
-        const from = nodesById.get(link.nodeIdFrom);
-        const to = nodesById.get(link.nodeIdTo);
-        if (
-          from &&
-          to &&
-          from.floorId !== to.floorId &&
-          graph.has(from.id) &&
-          graph.has(to.id)
-        ) {
-          add(from.id, {
-            to: to.id,
-            weight: this.elevatorWeight,
-            kind: "ELEVATOR",
-          });
-          add(to.id, {
-            to: from.id,
-            weight: this.elevatorWeight,
-            kind: "ELEVATOR",
-          });
-        }
-      }
-    const exitNodeIds = new Set(
-      [
-        ...nodes
-          .filter(
-            (node) =>
-              node.type === NodeType.EXIT ||
-              node.type === NodeType.EMERGENCY_EXIT,
-          )
-          .map((node) => node.id),
-        ...exitPois.map((poi) => poi.nodeId),
-      ].filter((nodeId) => graph.has(nodeId)),
-    );
-    const targetIds = evacuation
+    const targetIds: ReadonlySet<string> = evacuation
       ? requestedTarget
         ? new Set([requestedTarget.id])
-        : exitNodeIds
+        : snapshot.exitNodeIds
       : new Set([store!.node!.id]);
     const routeContext = {
       fromNodeId: source.id,
@@ -309,11 +166,14 @@ export class NavigationService {
         context: routeContext,
       })
       .catch(() => undefined);
-    const result = dijkstra(graph, source.id, targetIds, {
+    const route = planRoute(snapshot, source.id, targetIds, {
+      wheelchairMode: dto.wheelchairMode,
+      evacuation,
       blockedNodeIds,
-      excludedKinds: evacuation ? new Set(["ELEVATOR"]) : undefined,
     });
-    if (!result) {
+    if (!route) {
+      // Edges of an uncalibrated floor are not in the graph, so a missing route may only mean "not measured yet".
+      if (snapshot.uncalibratedFloorIds.length) throw this.notCalibrated([...snapshot.uncalibratedFloorIds]);
       void this.analytics
         .enqueue({
           eventType: "ROUTE_NOT_FOUND",
@@ -330,15 +190,14 @@ export class NavigationService {
           : "No available route was found",
       });
     }
-    const distanceMeters = result.distance / this.unitsPerMeter;
-    const steps = result.nodeIds.map((nodeId, index) => {
-      const node = nodesById.get(nodeId)!;
-      const edge = result.edges[index];
-      const next = edge ? nodesById.get(edge.to)! : undefined;
-      const transition =
-        edge?.kind === "ELEVATOR" ? ("ELEVATOR" as const) : undefined;
+    const distanceMeters = Math.round(route.walkMeters * 100) / 100;
+    const steps = route.nodeIds.map((nodeId, index) => {
+      const node = snapshot.nodes.get(nodeId)!;
+      const leg = route.legs[index];
+      const next = leg ? snapshot.nodes.get(leg.toNodeId)! : undefined;
+      const transition = leg && leg.kind !== "WALK" ? leg.kind : undefined;
       const bearing =
-        next && edge?.kind === "WALK"
+        next && leg?.kind === "WALK"
           ? ((Math.atan2(next.y - node.y, next.x - node.x) * 180) / Math.PI +
               360) %
             360
@@ -353,7 +212,7 @@ export class NavigationService {
           ? {
               transition,
               targetFloorId: next!.floorId,
-              instruction: `Take the elevator to floor ${next!.floorId}`,
+              instruction: `Take the ${transition.toLowerCase()} to floor ${snapshot.floors.get(next!.floorId)!.floorNumber}`,
             }
           : {
               instruction: next
@@ -368,9 +227,9 @@ export class NavigationService {
       totalDistance: distanceMeters,
       estimatedDurationSeconds: Math.max(
         1,
-        Math.round(distanceMeters / this.walkingSpeed),
+        Math.round(route.walkMeters / this.walkingSpeed + route.rideSeconds),
       ),
-      nodeIds: result.nodeIds,
+      nodeIds: route.nodeIds,
       steps,
     };
     void this.analytics
