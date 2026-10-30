@@ -57,10 +57,16 @@ describeE2E('Week 2 Map Editor (e2e)', () => {
 
     await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/edges`).set('Authorization', `Bearer ${token}`).send({ fromNodeId: elevatorOneId, toNodeId: normalNodeId }).expect(201);
     await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/edges`).set('Authorization', `Bearer ${token}`).send({ fromNodeId: normalNodeId, toNodeId: elevatorOneId }).expect(409);
-    await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/pois`).set('Authorization', `Bearer ${token}`).send({ nodeId: normalNodeId, name: 'E2E information', category: 'INFO' }).expect(201);
+    await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/pois`).set('Authorization', `Bearer ${token}`).send({ x: 200, y: 100, nodeId: normalNodeId, name: 'E2E information', category: 'INFO' }).expect(201);
 
     await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/publish`).set('Authorization', `Bearer ${token}`).expect(400);
     await request(app.getHttpServer()).post(`/api/v1/buildings/${buildingId}/elevator-links`).set('Authorization', `Bearer ${token}`).send({ nodeIdFrom: elevatorOneId, nodeIdTo: elevatorTwoId }).expect(201);
+    const exit = await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/nodes`).set('Authorization', `Bearer ${token}`).send({ x: 300, y: 100, type: 'EXIT' }).expect(201);
+    await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/edges`).set('Authorization', `Bearer ${token}`).send({ fromNodeId: normalNodeId, toNodeId: exit.body.data.id }).expect(201);
+    await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/publish`).set('Authorization', `Bearer ${token}`).expect(400); // not calibrated yet
+    await request(app.getHttpServer()).patch(`/api/v1/floors/${floorOneId}/calibration`).set('Authorization', `Bearer ${token}`).send({ metersPerPixel: 0.05 }).expect(200);
+    const report = await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/graph/validate`).set('Authorization', `Bearer ${token}`).expect(200);
+    expect(report.body.data.valid).toBe(true);
     await request(app.getHttpServer()).post(`/api/v1/floors/${floorOneId}/publish`).set('Authorization', `Bearer ${token}`).expect(201);
 
     await request(app.getHttpServer()).delete(`/api/v1/floors/${floorOneId}`).set('Authorization', `Bearer ${token}`).expect(200);

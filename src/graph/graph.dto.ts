@@ -1,7 +1,6 @@
-import { EdgeStatus, NodeType, PoiCategory } from '@prisma/client';
+import { EdgeStatus, NodeType } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateNested } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateNodeDto {
   @ApiProperty({ example: 240.5 }) @IsNumber() x!: number;
@@ -9,6 +8,7 @@ export class CreateNodeDto {
   @ApiPropertyOptional({ example: 'Cửa vào Zara', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) name?: string;
   @ApiProperty({ enum: NodeType, example: NodeType.JUNCTION }) @IsEnum(NodeType) type!: NodeType;
   @ApiPropertyOptional({ example: true, default: true }) @IsOptional() @IsBoolean() accessible?: boolean;
+  @ApiPropertyOptional({ example: 7, description: 'Optimistic concurrency: rejected with GRAPH_VERSION_CONFLICT when it differs from Floor.graphVersion' }) @IsOptional() @IsInt() @Min(0) expectedGraphVersion?: number;
 }
 export class UpdateNodeDto {
   @ApiPropertyOptional({ example: 240.5 }) @IsOptional() @IsNumber() x?: number;
@@ -16,28 +16,18 @@ export class UpdateNodeDto {
   @ApiPropertyOptional({ enum: NodeType }) @IsOptional() @IsEnum(NodeType) type?: NodeType;
   @ApiPropertyOptional({ example: 'Thang máy A', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) name?: string;
   @ApiPropertyOptional({ example: true }) @IsOptional() @IsBoolean() accessible?: boolean;
+  @ApiPropertyOptional({ example: 7, description: 'Optimistic concurrency: rejected with GRAPH_VERSION_CONFLICT when it differs from Floor.graphVersion' }) @IsOptional() @IsInt() @Min(0) expectedGraphVersion?: number;
 }
 export class CreateEdgeDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() fromNodeId!: string;
   @ApiProperty({ format: 'uuid' }) @IsUUID() toNodeId!: string;
   @ApiPropertyOptional({ example: true, default: true }) @IsOptional() @IsBoolean() accessible?: boolean;
   @ApiPropertyOptional({ enum: EdgeStatus, default: EdgeStatus.ACTIVE }) @IsOptional() @IsEnum(EdgeStatus) status?: EdgeStatus;
+  @ApiPropertyOptional({ example: 7, description: 'Optimistic concurrency: rejected with GRAPH_VERSION_CONFLICT when it differs from Floor.graphVersion' }) @IsOptional() @IsInt() @Min(0) expectedGraphVersion?: number;
 }
 export class UpdateEdgeDto {
   @ApiPropertyOptional({ example: true }) @IsOptional() @IsBoolean() accessible?: boolean;
   @ApiPropertyOptional({ enum: EdgeStatus }) @IsOptional() @IsEnum(EdgeStatus) status?: EdgeStatus;
-}
-export class CreatePoiDto {
-  @ApiProperty({ format: 'uuid' }) @IsUUID() nodeId!: string;
-  @ApiProperty({ example: 'North restroom', maxLength: 100 }) @IsString() @MaxLength(100) name!: string;
-  @ApiProperty({ enum: PoiCategory, example: PoiCategory.RESTROOM }) @IsEnum(PoiCategory) category!: PoiCategory;
-  @ApiPropertyOptional({ example: 'restroom' }) @IsOptional() @IsString() @MaxLength(100) icon?: string;
-}
-export class UpdatePoiDto {
-  @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() nodeId?: string;
-  @ApiPropertyOptional({ example: 'North restroom', maxLength: 100 }) @IsOptional() @IsString() @MaxLength(100) name?: string;
-  @ApiPropertyOptional({ enum: PoiCategory }) @IsOptional() @IsEnum(PoiCategory) category?: PoiCategory;
-  @ApiPropertyOptional({ example: 'restroom' }) @IsOptional() @IsString() @MaxLength(100) icon?: string;
 }
 export class CreateElevatorLinkDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() nodeIdFrom!: string;
@@ -59,23 +49,6 @@ export class NavigationDraftEdgeDto {
   @IsOptional() @IsBoolean() accessible?: boolean;
   @IsOptional() @IsBoolean() confirmed?: boolean;
 }
-export class ApplyNavigationDraftDto {
-  @ApiPropertyOptional({ format: 'uuid', description: 'Client-generated id; repeating it for the same floor returns the first result instead of creating duplicates' })
-  @IsOptional() @IsUUID() draftId?: string;
-  @ApiPropertyOptional({ enum: ['APPEND'], default: 'APPEND', description: 'Only APPEND is supported: applied nodes/edges are added next to the existing graph' })
-  @IsOptional() @IsIn(['APPEND']) mode?: 'APPEND';
-  @IsArray() @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => NavigationDraftNodeDto) nodes!: NavigationDraftNodeDto[];
-  @IsArray() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => NavigationDraftEdgeDto) edges!: NavigationDraftEdgeDto[];
-}
-
-export class NavigationDraftApplyResponse {
-  @ApiProperty({ example: 12 }) nodesCreated!: number;
-  @ApiProperty({ example: 11 }) edgesCreated!: number;
-  @ApiProperty({ type: 'object', additionalProperties: { type: 'string', format: 'uuid' }, description: 'draft node id -> persisted node id' }) nodeIds!: Record<string, string>;
-  @ApiProperty({ type: 'object', additionalProperties: { type: 'string', format: 'uuid' }, description: 'draft edge id -> persisted edge id' }) edgeIds!: Record<string, string>;
-  @ApiProperty({ example: false, description: 'true when draftId was already applied and this is the stored first result' }) replayed!: boolean;
-}
-
 export class NodeResponse {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) tenantId!: string;
@@ -94,20 +67,10 @@ export class EdgeResponse {
   @ApiProperty({ format: 'uuid' }) floorId!: string;
   @ApiProperty({ format: 'uuid' }) fromNodeId!: string;
   @ApiProperty({ format: 'uuid' }) toNodeId!: string;
-  @ApiProperty({ example: 120.42 }) weight!: number;
+  @ApiProperty({ example: 120.42, description: 'Legacy length in map pixels; superseded by weightMeters' }) weight!: number;
+  @ApiProperty({ example: 6.02, nullable: true, description: 'Length in metres; null until the floor is calibrated' }) weightMeters!: number | null;
   @ApiProperty({ example: true }) accessible!: boolean;
   @ApiProperty({ enum: EdgeStatus }) status!: EdgeStatus;
-  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
-  @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
-}
-
-export class PoiResponse {
-  @ApiProperty({ format: 'uuid' }) id!: string;
-  @ApiProperty({ format: 'uuid' }) floorId!: string;
-  @ApiProperty({ format: 'uuid' }) nodeId!: string;
-  @ApiProperty({ example: 'North restroom' }) name!: string;
-  @ApiProperty({ enum: PoiCategory }) category!: PoiCategory;
-  @ApiPropertyOptional({ example: 'restroom', nullable: true }) icon!: string | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: Date;
   @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
 }

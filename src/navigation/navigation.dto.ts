@@ -10,6 +10,10 @@ export class PublicSearchQuery {
 }
 
 export class CreateRouteDto {
+  @ApiPropertyOptional({ enum: ["en", "vi"], default: "en", description: "Language of step instructions" })
+  @IsOptional()
+  @IsIn(["en", "vi"])
+  lang?: "en" | "vi";
   @ApiProperty({ format: "uuid" }) @IsUUID() fromNodeId!: string;
   @ApiPropertyOptional({
     format: "uuid",
@@ -70,13 +74,13 @@ export class RouteStepResponse {
   @ApiProperty({ example: 100 }) x!: number;
   @ApiProperty({ example: 200 }) y!: number;
   @ApiPropertyOptional({ example: 90, minimum: 0, maximum: 360, nullable: true }) bearing!: number | null;
-  @ApiPropertyOptional({ enum: ['ELEVATOR'], nullable: true }) transition?: 'ELEVATOR';
+  @ApiPropertyOptional({ enum: ['ELEVATOR', 'STAIR', 'ESCALATOR'], nullable: true }) transition?: 'ELEVATOR' | 'STAIR' | 'ESCALATOR';
   @ApiPropertyOptional({ format: 'uuid', nullable: true }) targetFloorId?: string;
   @ApiProperty({ example: 'Continue straight' }) instruction!: string;
 }
 
 export class RouteResponse {
-  @ApiProperty({ example: 320.5 }) totalDistance!: number;
+  @ApiProperty({ example: 320.5, description: 'Walking distance in metres (connector rides are counted in estimatedDurationSeconds)' }) totalDistance!: number;
   @ApiProperty({ example: 267 }) estimatedDurationSeconds!: number;
   @ApiProperty({ type: [String], format: 'uuid' }) nodeIds!: string[];
   @ApiProperty({ type: [RouteStepResponse] }) steps!: RouteStepResponse[];
