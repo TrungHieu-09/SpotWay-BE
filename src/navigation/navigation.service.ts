@@ -7,6 +7,8 @@ import { GraphCacheService } from '../graph/application/graph-cache.service';
 import { GRAPH_ERROR_CODES } from '../graph/domain/graph.types';
 import { planRoute } from '../graph/domain/pathfinding/route-planner';
 import { CreateRouteDto, PublicSearchQuery } from './navigation.dto';
+import { buildGuidance } from './route-guidance';
+import { mergeVerticalLinks } from './vertical-links';
 
 @Injectable()
 export class NavigationService {
@@ -191,37 +193,13 @@ export class NavigationService {
       });
     }
     const distanceMeters = Math.round(route.walkMeters * 100) / 100;
-    const steps = route.nodeIds.map((nodeId, index) => {
-      const node = snapshot.nodes.get(nodeId)!;
-      const leg = route.legs[index];
-      const next = leg ? snapshot.nodes.get(leg.toNodeId)! : undefined;
-      const transition = leg && leg.kind !== "WALK" ? leg.kind : undefined;
-      const bearing =
-        next && leg?.kind === "WALK"
-          ? ((Math.atan2(next.y - node.y, next.x - node.x) * 180) / Math.PI +
-              360) %
-            360
-          : null;
-      return {
-        nodeId,
-        floorId: node.floorId,
-        x: node.x,
-        y: node.y,
-        bearing,
-        ...(transition
-          ? {
-              transition,
-              targetFloorId: next!.floorId,
-              instruction: `Take the ${transition.toLowerCase()} to floor ${snapshot.floors.get(next!.floorId)!.floorNumber}`,
-            }
-          : {
-              instruction: next
-                ? "Continue to the next point"
-                : evacuation
-                  ? "You have reached a safe exit"
-                  : "You have arrived",
-            }),
-      };
+    const steps = buildGuidance({
+      nodeIds: route.nodeIds,
+      legs: route.legs,
+      node: (id) => snapshot.nodes.get(id)!,
+      floorNumber: (floorId) => snapshot.floors.get(floorId)!.floorNumber,
+      evacuation,
+      lang: dto.lang ?? "en",
     });
     const response = {
       totalDistance: distanceMeters,
@@ -229,6 +207,11 @@ export class NavigationService {
         1,
         Math.round(route.walkMeters / this.walkingSpeed + route.rideSeconds),
       ),
+      walkingDurationSeconds: Math.round(route.walkMeters / this.walkingSpeed),
+      transitionDurationSeconds: Math.round(route.rideSeconds),
+      requestedMode: mode,
+      effectiveMode: evacuation ? "EVACUATION" : "NORMAL",
+      warnings: [] as Array<{ code: string; severity: string; message: string }>,
       nodeIds: route.nodeIds,
       steps,
     };
@@ -251,8 +234,9 @@ export class NavigationService {
   async overview(buildingId: string) {
     const building = await this.activeBuilding(buildingId); const floors = await this.publishedFloors(buildingId);
     const floorIds = floors.map((f) => f.id);
-    const [links, nodes, edges, pois, stores, revisions] = await Promise.all([
+    const [links, connectors, nodes, edges, pois, stores, revisions] = await Promise.all([
       this.prisma.elevatorLink.findMany({ where: { buildingId, deletedAt: null }, select: { id: true, nodeIdFrom: true, nodeIdTo: true } }),
+      this.prisma.connector.findMany({ where: { buildingId, deletedAt: null }, select: { id: true, kind: true, accessible: true, stops: { select: { nodeId: true, floor: { select: { floorNumber: true } } } } } }),
       floorIds.length ? this.prisma.node.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, x: true, y: true, type: true, accessible: true } }) : Promise.resolve([]),
       floorIds.length ? this.prisma.edge.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, fromNodeId: true, toNodeId: true, weight: true } }) : Promise.resolve([]),
       floorIds.length ? this.prisma.poi.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, nodeId: true, name: true, category: true } }) : Promise.resolve([]),
@@ -273,7 +257,7 @@ export class NavigationService {
         mapHeight: floor.mapHeight,
         mapRevision: revisionByFloor.get(floor.id),
       })),
-      verticalLinks: links.map((link) => ({ ...link, kind: 'ELEVATOR' })),
+      verticalLinks: mergeVerticalLinks(links, connectors),
       nodes,
       edges,
       pois,

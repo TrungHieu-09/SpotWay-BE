@@ -77,6 +77,23 @@ describe("NavigationService.route", () => {
     expect(result.estimatedDurationSeconds).toBe(Math.round(2 / 1.2 + 30 + 3 * 2));
   });
 
+  it("returns turn-by-turn guidance and mode info, in Vietnamese when asked", async () => {
+    const nodes = [node("start"), node("l1"), node("l2", floor2.id), node("target", floor2.id)];
+    const { service } = setup({
+      nodes, edges: [edge("start", "l1", 2), edge("l2", "target", 3)], storeTargetId: "target",
+      connectors: [connector("lift", ConnectorKind.ELEVATOR, [[floor1.id, "l1"], [floor2.id, "l2"]])],
+    });
+    const vi = await service.route({ ...normal("start"), lang: "vi" } as never);
+    expect(vi).toMatchObject({ effectiveMode: "NORMAL", requestedMode: "NORMAL", warnings: [] });
+    expect(vi.steps[1]).toMatchObject({ maneuver: "ELEVATOR", waitSeconds: 30, transition: "ELEVATOR" });
+    expect(vi.steps[1].instruction).toBe("Đi thang máy lên Tầng 2 (chờ ~30 s)");
+    expect(vi.steps[0]).toMatchObject({ maneuver: "START", distanceMeters: 2 });
+    expect(vi.steps[vi.steps.length - 1]).toMatchObject({ maneuver: "ARRIVE", instruction: "Đã đến điểm đến" });
+    // mặc định giữ chữ tiếng Anh để client cũ không bị ảnh hưởng
+    const en = await service.route(normal("start"));
+    expect(en.steps[0].instruction).toBe("Continue to the next point");
+  });
+
   it("prefers stairs for one floor and a lift for several", async () => {
     const nodes = [node("start"), node("lift-1"), node("stair-1"), node("lift-2", floor2.id), node("stair-2", floor2.id), node("lift-3", floor3.id), node("stair-3", floor3.id), node("t2", floor2.id), node("t3", floor3.id)];
     const connectors = [

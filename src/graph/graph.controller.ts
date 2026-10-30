@@ -38,6 +38,9 @@ export class GraphController {
   @Delete('nodes/:id') @ApiOperation({ summary: 'Soft-delete a node and its adjacent edges' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Node deleted successfully') @ApiStandardErrors() @Roles(...graphRoles)
   deleteNode(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.graph.deleteNode(user, id); }
 
+  @Delete('floors/:floorId/graph') @ApiOperation({ summary: 'Delete every node and edge of a floor (and its POIs and connectors) in one transaction' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Floor graph cleared') @ApiStandardErrors() @Roles(...graphRoles)
+  clearFloorGraph(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string) { return this.graph.clearFloorGraph(user, floorId); }
+
   @Get('floors/:floorId/edges') @ApiOperation({ summary: 'List edges in a floor' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Edges returned successfully', { type: 'array', items: { $ref: '#/components/schemas/EdgeResponse' } }) @ApiStandardErrors() @Roles(...graphRoles)
   listEdges(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string) { return this.graph.listEdges(user, floorId); }
   @Post('floors/:floorId/edges') @ApiOperation({ summary: 'Create an undirected edge; weight is calculated from node coordinates' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(201, 'Edge created successfully', { $ref: '#/components/schemas/EdgeResponse' }) @ApiStandardErrors() @Roles(...graphRoles)
@@ -55,6 +58,8 @@ export class GraphController {
   snapPoi(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string, @Query() query: SnapPoiQuery) { return this.pois.snap(user, floorId, query.x, query.y, query.maxSnapMeters); }
   @Post('floors/:floorId/pois') @ApiOperation({ summary: 'Create a POI at (x, y); it snaps to the nearest node unless nodeId is given' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(201, 'POI created successfully', { $ref: '#/components/schemas/PoiV2Response' }) @ApiStandardErrors() @Roles(...graphRoles)
   createPoi(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string, @Body() dto: CreatePoiV2Dto) { return this.pois.create(user, floorId, dto); }
+  @Delete('floors/:floorId/pois') @ApiOperation({ summary: 'Soft-delete every POI of a floor in one transaction' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Floor POIs deleted') @ApiStandardErrors() @Roles(...graphRoles)
+  deleteFloorPois(@CurrentUser() user: AuthUser, @Param('floorId') floorId: string) { return this.pois.removeAllOnFloor(user, floorId); }
   @Get('pois/:id') @ApiOperation({ summary: 'Get a POI' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'POI found', { $ref: '#/components/schemas/PoiV2Response' }) @ApiStandardErrors() @Roles(...graphRoles)
   getPoi(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.pois.get(user, id); }
   @Patch('pois/:id') @ApiOperation({ summary: 'Update a POI; changing its position re-snaps it' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'POI updated successfully', { $ref: '#/components/schemas/PoiV2Response' }) @ApiStandardErrors() @Roles(...graphRoles)

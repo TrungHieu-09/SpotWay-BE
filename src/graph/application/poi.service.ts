@@ -68,6 +68,16 @@ export class PoiService {
     return this.prisma.$transaction(async (tx) => { await bumpGraphVersion(tx, poi.floorId); return tx.poi.update({ where: { id }, data: { deletedAt: new Date() } }); });
   }
 
+  /** Soft-deletes every POI of a floor in one statement (one graphVersion bump) instead of one transaction per POI. */
+  async removeAllOnFloor(user: AuthUser, floorId: string) {
+    await loadFloor(this.prisma, this.access, user, floorId);
+    return this.prisma.$transaction(async (tx) => {
+      await bumpGraphVersion(tx, floorId);
+      const { count } = await tx.poi.updateMany({ where: { floorId, deletedAt: null }, data: { deletedAt: new Date() } });
+      return { floorId, pois: count };
+    }, { timeout: 30_000, maxWait: 10_000 });
+  }
+
   /** Explicit nodeId is validated and measured; otherwise the POI snaps to the nearest node. */
   private async resolveAnchor(floor: { id: string; metersPerPixel: number | null; tenantId: string }, placement: Placement): Promise<{ nodeId: string; distanceMeters: number | null }> {
     if (!placement.nodeId) return this.resolveSnap(floor, placement);

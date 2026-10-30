@@ -65,6 +65,41 @@ export class GraphService {
     });
   }
 
+  /**
+   * Empties a floor's graph in ONE transaction: every node and edge, plus what hangs off them (POIs, and whole connectors
+   * that stop here, since a connector with a missing stop is meaningless). Stores and QR anchors are business data that
+   * this call must not silently drop, so they still block it. Deleting node by node instead takes one floor lock per node
+   * (graphVersion bump) and times out on a floor of a few dozen nodes.
+   */
+  async clearFloorGraph(user: AuthUser, floorId: string) {
+    await this.floor(user, floorId);
+    return this.prisma.$transaction(async (tx) => {
+      await bumpGraphVersion(tx, floorId);
+      const nodeIds = (await tx.node.findMany({ where: { floorId, deletedAt: null }, select: { id: true } })).map((node) => node.id);
+      if (!nodeIds.length) return { floorId, nodes: 0, edges: 0, pois: 0, connectors: 0 };
+      const [stores, qrAnchors] = await Promise.all([
+        tx.store.count({ where: { nodeId: { in: nodeIds }, deletedAt: null } }),
+        tx.qrAnchor.count({ where: { nodeId: { in: nodeIds }, deletedAt: null } }),
+      ]);
+      if (stores + qrAnchors) throw dependencyConflict({ pois: 0, stores, qrAnchors, connectorStops: 0 });
+
+      const now = new Date();
+      const connectorIds = [...new Set((await tx.connectorStop.findMany({ where: { floorId }, select: { connectorId: true } })).map((stop) => stop.connectorId))];
+      const stops = connectorIds.length ? await tx.connectorStop.findMany({ where: { connectorId: { in: connectorIds } }, select: { floorId: true, nodeId: true } }) : [];
+      const linkedNodeIds = [...new Set([...nodeIds, ...stops.map((stop) => stop.nodeId)])];
+      if (connectorIds.length) {
+        await tx.connectorStop.deleteMany({ where: { connectorId: { in: connectorIds } } });
+        await tx.connector.updateMany({ where: { id: { in: connectorIds } }, data: { deletedAt: now } });
+      }
+      await tx.elevatorLink.updateMany({ where: { deletedAt: null, OR: [{ nodeIdFrom: { in: linkedNodeIds } }, { nodeIdTo: { in: linkedNodeIds } }] }, data: { deletedAt: now } });
+      const pois = await tx.poi.updateMany({ where: { floorId, deletedAt: null }, data: { deletedAt: now } });
+      const edges = await tx.edge.updateMany({ where: { floorId, deletedAt: null }, data: { deletedAt: now } });
+      const nodes = await tx.node.updateMany({ where: { floorId, deletedAt: null }, data: { deletedAt: now } });
+      for (const otherFloorId of new Set(stops.map((stop) => stop.floorId).filter((id) => id !== floorId))) await bumpGraphVersion(tx, otherFloorId);
+      return { floorId, nodes: nodes.count, edges: edges.count, pois: pois.count, connectors: connectorIds.length };
+    }, { timeout: 60_000, maxWait: 10_000 });
+  }
+
   async listEdges(user: AuthUser, floorId: string) { await this.floor(user, floorId); return this.prisma.edge.findMany({ where: { floorId, deletedAt: null }, orderBy: { createdAt: 'asc' } }); }
   async createEdge(user: AuthUser, floorId: string, dto: CreateEdgeDto) {
     const floor = await this.floor(user, floorId);

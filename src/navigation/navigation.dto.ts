@@ -10,6 +10,10 @@ export class PublicSearchQuery {
 }
 
 export class CreateRouteDto {
+  @ApiPropertyOptional({ enum: ["en", "vi"], default: "en", description: "Language of step instructions" })
+  @IsOptional()
+  @IsIn(["en", "vi"])
+  lang?: "en" | "vi";
   @ApiProperty({ format: "uuid" }) @IsUUID() fromNodeId!: string;
   @ApiPropertyOptional({
     format: "uuid",
