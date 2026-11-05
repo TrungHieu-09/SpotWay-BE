@@ -141,6 +141,20 @@ model OAuthCode {
   @@map("oauth_codes")
 }
 
+model EmailOtp {
+  id        String    @id @default(uuid())
+  email     String
+  codeHash  String    @map("code_hash")
+  fullName  String?   @map("full_name")
+  password  String?
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([email, expiresAt])
+  @@map("email_otps")
+}
+
 model Building {
   id                 String            @id @default(uuid())
   tenantId           String            @map("tenant_id")

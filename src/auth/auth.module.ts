@@ -8,4 +8,20 @@ import { TenantStatusGuard } from '../common/tenant-status.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { GoogleStrategy } from './google.strategy';
-@Global() @Module({ imports: [JwtModule.register({}), PassportModule], controllers: [AuthController], providers: [AuthService, GoogleStrategy, { provide: APP_GUARD, useClass: JwtAuthGuard }, { provide: APP_GUARD, useClass: TenantStatusGuard }, { provide: APP_GUARD, useClass: RolesGuard }], exports: [JwtModule, AuthService] }) export class AuthModule {}
+import { MailService } from './mail.service';
+
+@Global()
+@Module({
+  imports: [JwtModule.register({}), PassportModule],
+  controllers: [AuthController],
+  providers: [
+    AuthService,
+    MailService,
+    GoogleStrategy,
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: TenantStatusGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+  ],
+  exports: [JwtModule, AuthService],
+})
+export class AuthModule {}
