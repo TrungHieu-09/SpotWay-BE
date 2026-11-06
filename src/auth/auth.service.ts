@@ -6,6 +6,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { TenantStatus, User, UserRole } from '@prisma/client';
@@ -18,6 +19,9 @@ type GoogleProfile = { googleId: string; email?: string; emailVerified: boolean 
 
 @Injectable()
 export class AuthService {
+  private static readonly FORGOT_PASSWORD_MESSAGE =
+    'Nếu tài khoản tồn tại trong hệ thống, liên kết đặt lại mật khẩu đã được gửi đến email của bạn.';
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -233,6 +237,147 @@ export class AuthService {
       /* logout remains idempotent */
     }
     return { loggedOut: true };
+  }
+
+  async forgotPassword(email: string) {
+    const normalized = email.trim().toLowerCase();
+    const user = await this.prisma.user.findFirst({
+      where: { email: normalized, deletedAt: null },
+    });
+
+    // Same response whether or not the account exists, so the endpoint cannot be used to probe emails.
+    if (!user) {
+      return { message: AuthService.FORGOT_PASSWORD_MESSAGE };
+    }
+
+    await this.prisma.emailOtp.deleteMany({
+      where: { email: normalized, usedAt: null },
+    });
+
+    const resetToken = randomBytes(32).toString('hex');
+    const tokenHash = this.hashCode(resetToken);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+    await this.prisma.emailOtp.create({
+      data: {
+        email: normalized,
+        codeHash: tokenHash,
+        expiresAt,
+      },
+    });
+
+    const frontendBase = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const resetUrl = `${frontendBase}/reset-password?token=${resetToken}&email=${encodeURIComponent(normalized)}`;
+
+    await this.mail.sendPasswordReset(normalized, resetUrl);
+
+    // The token must only travel by email: never return it in the response.
+    return { message: AuthService.FORGOT_PASSWORD_MESSAGE };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    if (!token || !newPassword || newPassword.length < 8) {
+      throw new BadRequestException({
+        code: 'INVALID_REQUEST',
+        message: 'Mật khẩu mới phải có tối thiểu 8 ký tự',
+      });
+    }
+
+    const tokenHash = this.hashCode(token);
+    const otpEntry = await this.prisma.emailOtp.findFirst({
+      where: {
+        codeHash: tokenHash,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (!otpEntry) {
+      throw new BadRequestException({
+        code: 'INVALID_TOKEN',
+        message: 'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu liên kết mới.',
+      });
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { email: otpEntry.email, deletedAt: null },
+    });
+
+    if (!user) {
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy tài khoản người dùng',
+      });
+    }
+
+    await this.prisma.emailOtp.update({
+      where: { id: otpEntry.id },
+      data: { usedAt: new Date() },
+    });
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: newHash },
+    });
+
+    await this.prisma.refreshSession.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    return {
+      success: true,
+      message: 'Đặt lại mật khẩu thành công. Bạn có thể đăng nhập ngay với mật khẩu mới.',
+    };
+  }
+
+  async changePassword(userId: string, currentPassword?: string, newPassword?: string) {
+    if (!newPassword || newPassword.length < 8) {
+      throw new BadRequestException({
+        code: 'INVALID_PASSWORD',
+        message: 'Mật khẩu mới phải có tối thiểu 8 ký tự',
+      });
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+    });
+
+    if (!user) {
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy tài khoản người dùng',
+      });
+    }
+
+    // If the user already has a password set, currentPassword is required and must match
+    if (user.passwordHash) {
+      if (!currentPassword) {
+        throw new BadRequestException({
+          code: 'CURRENT_PASSWORD_REQUIRED',
+          message: 'Vui lòng nhập mật khẩu hiện tại',
+        });
+      }
+      const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!isMatch) {
+        throw new BadRequestException({
+          code: 'INCORRECT_CURRENT_PASSWORD',
+          message: 'Mật khẩu hiện tại không chính xác',
+        });
+      }
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: newHash },
+    });
+
+    return {
+      success: true,
+      message: 'Mật khẩu đã được cập nhật thành công.',
+    };
   }
 
   async googleLogin(profile: GoogleProfile) {

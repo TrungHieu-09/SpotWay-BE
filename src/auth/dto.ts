@@ -56,3 +56,33 @@ export class OAuthExchangeDto {
   code!: string;
 }
 
+
+export class ForgotPasswordDto {
+  @ApiProperty({ format: 'email', example: 'user@example.com' })
+  @IsEmail()
+  email!: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty({ description: 'Password reset token from email link' })
+  @IsString()
+  token!: string;
+
+  @ApiProperty({ format: 'password', minLength: 8, example: 'NewPassword123!' })
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}
+
+export class ChangePasswordDto {
+  @ApiPropertyOptional({ format: 'password', example: 'OldPassword123!' })
+  @IsString()
+  @IsOptional()
+  currentPassword?: string;
+
+  @ApiProperty({ format: 'password', minLength: 8, example: 'NewPassword123!' })
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}
+

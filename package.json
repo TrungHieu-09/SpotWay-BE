@@ -5,7 +5,11 @@
 	"packageManager": "pnpm@10.32.1",
 	"scripts": {
 		"build": "nest build",
+		"free-port": "node scripts/free-port.cjs",
+		"reset-password": "node scripts/reset-password.cjs",
+		"prestart": "node scripts/free-port.cjs",
 		"start": "node dist/main",
+		"prestart:dev": "node scripts/free-port.cjs",
 		"start:dev": "nest start --watch",
 		"lint": "eslint \"src/**/*.ts\"",
 		"format": "prettier --check \"{src,prisma}/**/*.{ts,json}\"",

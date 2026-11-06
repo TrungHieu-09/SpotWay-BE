@@ -4,7 +4,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { Public } from '../common/public.decorator';
 import { AuthService } from './auth.service';
-import { LoginDto, OAuthExchangeDto, RefreshDto, RegisterDto, VerifyEmailDto, ResendOtpDto } from './dto';
+import { LoginDto, OAuthExchangeDto, RefreshDto, RegisterDto, VerifyEmailDto, ResendOtpDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto';
 import { ApiAuthTokenResponse, ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
@@ -70,6 +70,34 @@ export class AuthController {
   @ApiStandardErrors()
   logout(@Body() dto: RefreshDto) {
     return this.auth.logout(dto.refreshToken);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Request password reset link by email' })
+  @ApiStandardErrors()
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.auth.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password using token received via email' })
+  @ApiStandardErrors()
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.auth.resetPassword(dto.token, dto.newPassword);
+  }
+
+  @Post('change-password')
+  @ApiBearerAuth('bearerAuth')
+  @ApiOperation({ summary: 'Change or set user password' })
+  @ApiStandardErrors()
+  changePassword(
+    @Req() request: Request & { user?: AuthUser },
+    @Body() dto: ChangePasswordDto,
+  ) {
+    const authUser = request.user!;
+    return this.auth.changePassword(authUser.userId, dto.currentPassword, dto.newPassword);
   }
 
   @Get('me')

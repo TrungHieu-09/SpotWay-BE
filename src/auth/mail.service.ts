@@ -94,5 +94,83 @@ export class MailService {
       throw err;
     }
   }
+
+  async sendPasswordReset(to: string, resetLink: string, fullName?: string): Promise<void> {
+    const displayName = fullName || to.split('@')[0];
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Đặt lại mật khẩu SpotWay</title>
+</head>
+<body style="margin:0;padding:0;background:#0b0b1a;font-family:'Inter',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0b0b1a;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background:#1a1a2e;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;max-width:560px;">
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#a078ff,#5de6ff);padding:32px 40px;text-align:center;">
+              <div style="font-size:28px;font-weight:700;color:#0b0b1a;letter-spacing:-0.02em;font-family:'Space Grotesk',Arial,sans-serif;">⚡ SpotWay</div>
+              <div style="font-size:14px;color:rgba(0,0,0,0.6);margin-top:4px;">Indoor Spatial Intelligence</div>
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding:40px;">
+              <h1 style="color:#ffffff;font-size:22px;font-weight:600;margin:0 0 12px;font-family:'Space Grotesk',Arial,sans-serif;">Yêu cầu Đặt lại Mật khẩu</h1>
+              <p style="color:#cbc3d7;font-size:14px;line-height:1.6;margin:0 0 24px;">
+                Xin chào <strong style="color:#ffffff;">${displayName}</strong>,<br/>
+                Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản SpotWay của bạn. Nhấn vào nút bên dưới để thiết lập mật khẩu mới:
+              </p>
+              <!-- Button -->
+              <div style="text-align:center;margin:32px 0;">
+                <a href="${resetLink}" style="background:linear-gradient(135deg,#8B5CF6,#06B6D4);color:#ffffff;padding:14px 32px;border-radius:12px;text-decoration:none;font-weight:600;font-size:15px;display:inline-block;box-shadow:0 4px 16px rgba(139,92,246,0.4);">
+                  Đặt lại mật khẩu của tôi
+                </a>
+              </div>
+              <!-- Alternative link -->
+              <p style="color:#958ea0;font-size:12px;line-height:1.5;margin:0 0 24px;">
+                Hoặc sao chép liên kết này vào trình duyệt:<br/>
+                <a href="${resetLink}" style="color:#5de6ff;word-break:break-all;">${resetLink}</a>
+              </p>
+              <!-- Warning -->
+              <div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:8px;padding:12px 16px;margin:0 0 24px;">
+                <p style="color:#fca5a5;font-size:12px;margin:0;">
+                  🔒 <strong>Lưu ý:</strong> Liên kết này có hiệu lực trong 15 phút. Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này hoặc liên hệ quản trị viên.
+                </p>
+              </div>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 40px;border-top:1px solid rgba(255,255,255,0.06);text-align:center;">
+              <p style="color:#6c667a;font-size:11px;margin:0;">© 2026 SpotWay Spatial Intelligence. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    try {
+      await this.transporter.sendMail({
+        from: process.env.MAIL_FROM || `SpotWay <${process.env.MAIL_USER}>`,
+        to,
+        subject: `Yêu cầu đặt lại mật khẩu SpotWay`,
+        html,
+        text: `Nhấn vào liên kết sau để đặt lại mật khẩu của bạn:\n${resetLink}\n\nLiên kết có hiệu lực trong 15 phút.`,
+      });
+      this.logger.log(`Password reset email sent to ${to}`);
+    } catch (err) {
+      this.logger.error(`Failed to send password reset email to ${to}`, err);
+      // We do not rethrow so user enumeration or SMTP timeout doesn't fail the API call
+    }
+  }
 }
 
