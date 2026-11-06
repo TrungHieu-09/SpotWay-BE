@@ -32,7 +32,6 @@ import {
   ApiEnvelopeResponse,
   ApiStandardErrors,
 } from "../common/swagger";
-import { AuthUser } from "../common/auth.types";
 import { PrismaService } from "../database/prisma.service";
 
 @ApiTags("Authentication")
