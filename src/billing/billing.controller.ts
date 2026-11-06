@@ -1,10 +1,9 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Public } from '../common/public.decorator';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
-import { CreateWorkspaceOrderDto } from './billing.dto';
 import { BillingService } from './billing.service';
 
 @ApiTags('Billing')
@@ -21,14 +20,6 @@ export class BillingController {
     return this.billing.listPlans();
   }
 
-  @Post('orders')
-  @ApiOperation({ summary: 'Start buying a plan for a new workspace; the workspace is created once the order is paid' })
-  @ApiEnvelopeResponse(201, 'Order created successfully')
-  @ApiStandardErrors()
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateWorkspaceOrderDto) {
-    return this.billing.createWorkspaceOrder(user, dto);
-  }
-
   @Get('orders/:id')
   @ApiOperation({ summary: 'Get one of my orders' })
   @ApiEnvelopeResponse(200, 'Order returned successfully')
@@ -38,7 +29,7 @@ export class BillingController {
   }
 
   @Post('orders/:id/pay')
-  @ApiOperation({ summary: 'Pay an order (mock gateway outside production) and provision the workspace / extend the plan' })
+  @ApiOperation({ summary: 'Pay a renewal order (mock gateway outside production) and extend the plan' })
   @ApiEnvelopeResponse(201, 'Order paid successfully')
   @ApiStandardErrors()
   pay(@CurrentUser() user: AuthUser, @Param('id') id: string) {

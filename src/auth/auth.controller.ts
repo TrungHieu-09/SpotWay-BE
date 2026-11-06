@@ -4,7 +4,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { Public } from '../common/public.decorator';
 import { AuthService } from './auth.service';
-import { LoginDto, OAuthExchangeDto, RefreshDto, RegisterDto, VerifyEmailDto, ResendOtpDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto';
+import { LoginDto, OAuthExchangeDto, RefreshDto, ChangePasswordDto } from './dto';
 import { ApiAuthTokenResponse, ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
@@ -16,31 +16,6 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly prisma: PrismaService,
   ) {}
-
-  @Public()
-  @Post('register')
-  @ApiOperation({ summary: 'Register — sends OTP to email, does NOT log in yet' })
-  @ApiStandardErrors()
-  register(@Body() dto: RegisterDto) {
-    return this.auth.register(dto.email, dto.password, dto.fullName);
-  }
-
-  @Public()
-  @Post('verify-email')
-  @ApiOperation({ summary: 'Verify OTP and get access tokens' })
-  @ApiAuthTokenResponse(201, 'Email verified, tokens issued')
-  @ApiStandardErrors()
-  verifyEmail(@Body() dto: VerifyEmailDto) {
-    return this.auth.verifyEmail(dto.email, dto.code);
-  }
-
-  @Public()
-  @Post('resend-otp')
-  @ApiOperation({ summary: 'Resend OTP to email' })
-  @ApiStandardErrors()
-  resendOtp(@Body() dto: ResendOtpDto) {
-    return this.auth.resendOtp(dto.email);
-  }
 
   @Public()
   @Post('login')
@@ -70,22 +45,6 @@ export class AuthController {
   @ApiStandardErrors()
   logout(@Body() dto: RefreshDto) {
     return this.auth.logout(dto.refreshToken);
-  }
-
-  @Public()
-  @Post('forgot-password')
-  @ApiOperation({ summary: 'Request password reset link by email' })
-  @ApiStandardErrors()
-  forgotPassword(@Body() dto: ForgotPasswordDto) {
-    return this.auth.forgotPassword(dto.email);
-  }
-
-  @Public()
-  @Post('reset-password')
-  @ApiOperation({ summary: 'Reset password using token received via email' })
-  @ApiStandardErrors()
-  resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.auth.resetPassword(dto.token, dto.newPassword);
   }
 
   @Post('change-password')
@@ -128,15 +87,6 @@ export class AuthController {
           }
         : null,
     };
-  }
-
-  @Post('workspace')
-  @ApiBearerAuth('bearerAuth')
-  @ApiOperation({ summary: 'Return the current workspace; 402 when the user still has to buy a plan (see POST /billing/orders)' })
-  @ApiStandardErrors()
-  createWorkspace(@Req() request: Request & { user?: AuthUser }) {
-    const authUser = request.user!;
-    return this.auth.createWorkspace(authUser.userId);
   }
 
   @Public()

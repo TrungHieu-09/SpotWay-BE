@@ -1,10 +1,9 @@
 import { ConflictException, HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
-import { OrderKind, OrderStatus, PlanOrder, Prisma, ServicePackage, UserRole } from '@prisma/client';
+import { OrderKind, OrderStatus, PlanOrder, ServicePackage } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { AuthService } from '../auth/auth.service';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
-import { CreateRenewalOrderDto, CreateWorkspaceOrderDto } from './billing.dto';
+import { CreateRenewalOrderDto } from './billing.dto';
 import { PLANS, PURCHASABLE_PLANS, addMonths, orderAmountVnd } from './plans';
 
 /** Without a real payment provider only the mock gateway can confirm payments, and never in production. */
@@ -13,9 +12,10 @@ function mockGatewayEnabled() {
   return provider === 'mock' || (provider === undefined && process.env.NODE_ENV !== 'production');
 }
 
+/** Workspaces are created by an admin (POST /tenants); the only thing bought online is a renewal/upgrade of an existing one. */
 @Injectable()
 export class BillingService {
-  constructor(private readonly prisma: PrismaService, private readonly auth: AuthService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   listPlans() {
     return PURCHASABLE_PLANS;
@@ -30,8 +30,6 @@ export class BillingService {
       months: order.months,
       amountVnd: order.amountVnd,
       status: order.status,
-      workspaceName: order.workspaceName,
-      subdomain: order.subdomain,
       createdAt: order.createdAt.toISOString(),
       paidAt: order.paidAt?.toISOString() ?? null,
     };
@@ -43,26 +41,6 @@ export class BillingService {
       throw new ConflictException({ code: 'PLAN_NOT_PURCHASABLE', message: 'Gói này không thể mua trực tuyến. Vui lòng liên hệ SpotWay.' });
     }
     return plan;
-  }
-
-  /** Step 1 of onboarding: the Owner picks a plan and the workspace identity; nothing is provisioned until payment. */
-  async createWorkspaceOrder(user: AuthUser, dto: CreateWorkspaceOrderDto) {
-    const plan = this.purchasablePlan(dto.planId);
-    const current = await this.prisma.user.findUniqueOrThrow({ where: { id: user.userId }, include: { tenant: true } });
-    if (current.tenantId && current.tenant && !current.tenant.deletedAt) {
-      throw new ConflictException({ code: 'ALREADY_HAS_WORKSPACE', message: 'Tài khoản đã thuộc một workspace.' });
-    }
-    // The column is unique across soft-deleted tenants too, so do not filter on deletedAt.
-    if (await this.prisma.tenant.findUnique({ where: { subdomain: dto.subdomain }, select: { id: true } })) {
-      throw new ConflictException({ code: 'SUBDOMAIN_EXISTS', message: `Tên miền "${dto.subdomain}.spotway.app" đã được sử dụng. Vui lòng chọn tên khác.` });
-    }
-    const order = await this.prisma.$transaction(async (tx) => {
-      await tx.planOrder.updateMany({ where: { userId: user.userId, kind: OrderKind.NEW_WORKSPACE, status: OrderStatus.PENDING }, data: { status: OrderStatus.CANCELLED } });
-      return tx.planOrder.create({
-        data: { userId: user.userId, kind: OrderKind.NEW_WORKSPACE, plan: plan.id, months: dto.months, amountVnd: orderAmountVnd(plan, dto.months), workspaceName: dto.workspaceName.trim(), subdomain: dto.subdomain },
-      });
-    });
-    return this.serialize(order);
   }
 
   async createRenewalOrder(user: AuthUser, dto: CreateRenewalOrderDto) {
@@ -101,48 +79,33 @@ export class BillingService {
     const order = await this.owned(user, id);
     if (order.status === OrderStatus.PAID) return this.result(order);
     if (order.status !== OrderStatus.PENDING) throw new ConflictException({ code: 'ORDER_NOT_PAYABLE', message: 'Đơn hàng đã bị hủy.' });
+    if (order.kind !== OrderKind.RENEWAL) throw new ConflictException({ code: 'ORDER_NOT_PAYABLE', message: 'Loại đơn hàng này không còn được hỗ trợ. Vui lòng liên hệ quản trị viên.' });
     if (order.amountVnd > 0 && !mockGatewayEnabled()) {
       throw new HttpException({ code: 'PAYMENT_PROVIDER_NOT_CONFIGURED', message: 'Cổng thanh toán chưa được cấu hình.' }, HttpStatus.NOT_IMPLEMENTED);
     }
     return this.completeOrder(order.id, `MOCK-${randomUUID()}`);
   }
 
-  /** Single place that turns a paid order into a workspace or an extended subscription. */
+  /** Single place that turns a paid renewal order into an extended subscription. */
   async completeOrder(orderId: string, paymentRef: string) {
-    let paid: PlanOrder;
-    try {
-      paid = await this.prisma.$transaction(async (tx) => {
-        const claimed = await tx.planOrder.updateMany({ where: { id: orderId, status: OrderStatus.PENDING }, data: { status: OrderStatus.PAID, paidAt: new Date(), paymentRef } });
-        if (claimed.count !== 1) throw new ConflictException({ code: 'ORDER_NOT_PAYABLE', message: 'Đơn hàng không còn ở trạng thái chờ thanh toán.' });
-        const order = await tx.planOrder.findUniqueOrThrow({ where: { id: orderId } });
-        const now = new Date();
-        if (order.kind === OrderKind.NEW_WORKSPACE) {
-          const owner = await tx.user.findUniqueOrThrow({ where: { id: order.userId } });
-          if (owner.tenantId && (await tx.tenant.findFirst({ where: { id: owner.tenantId, deletedAt: null }, select: { id: true } }))) {
-            throw new ConflictException({ code: 'ALREADY_HAS_WORKSPACE', message: 'Tài khoản đã thuộc một workspace.' });
-          }
-          const tenant = await tx.tenant.create({ data: { name: order.workspaceName!, subdomain: order.subdomain!, servicePackage: order.plan, planExpiresAt: addMonths(now, order.months) } });
-          await tx.user.update({ where: { id: owner.id }, data: { tenantId: tenant.id, role: owner.role === UserRole.ADMIN ? UserRole.ADMIN : UserRole.BUILDING_OWNER } });
-          return tx.planOrder.update({ where: { id: order.id }, data: { tenantId: tenant.id } });
-        }
-        const tenant = await tx.tenant.findFirst({ where: { id: order.tenantId!, deletedAt: null } });
-        if (!tenant) throw new NotFoundException({ code: 'TENANT_NOT_FOUND', message: 'Không gian làm việc không tồn tại hoặc đã bị đóng' });
-        const base = tenant.planExpiresAt && tenant.planExpiresAt > now ? tenant.planExpiresAt : now;
-        await tx.tenant.update({ where: { id: tenant.id }, data: { servicePackage: order.plan, planExpiresAt: addMonths(base, order.months) } });
-        return order;
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException({ code: 'SUBDOMAIN_EXISTS', message: 'Tên miền workspace vừa được người khác sử dụng. Vui lòng chọn tên khác.' });
-      }
-      throw error;
-    }
+    const paid = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.planOrder.updateMany({ where: { id: orderId, status: OrderStatus.PENDING }, data: { status: OrderStatus.PAID, paidAt: new Date(), paymentRef } });
+      if (claimed.count !== 1) throw new ConflictException({ code: 'ORDER_NOT_PAYABLE', message: 'Đơn hàng không còn ở trạng thái chờ thanh toán.' });
+      const order = await tx.planOrder.findUniqueOrThrow({ where: { id: orderId } });
+      // Rolls the claim back: orders for creating a workspace were removed, and an old one must never be fulfilled.
+      if (order.kind !== OrderKind.RENEWAL || !order.tenantId) throw new ConflictException({ code: 'ORDER_NOT_PAYABLE', message: 'Loại đơn hàng này không còn được hỗ trợ.' });
+      const now = new Date();
+      const tenant = await tx.tenant.findFirst({ where: { id: order.tenantId, deletedAt: null } });
+      if (!tenant) throw new NotFoundException({ code: 'TENANT_NOT_FOUND', message: 'Không gian làm việc không tồn tại hoặc đã bị đóng' });
+      const base = tenant.planExpiresAt && tenant.planExpiresAt > now ? tenant.planExpiresAt : now;
+      await tx.tenant.update({ where: { id: tenant.id }, data: { servicePackage: order.plan, planExpiresAt: addMonths(base, order.months) } });
+      return order;
+    });
     return this.result(paid);
   }
 
-  private async result(order: PlanOrder) {
-    const session = order.kind === OrderKind.NEW_WORKSPACE ? await this.auth.issueSession(order.userId) : null;
-    return { order: this.serialize(order), session };
+  private result(order: PlanOrder) {
+    return { order: this.serialize(order) };
   }
 
   async listInvoices(tenantId: string | null) {

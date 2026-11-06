@@ -8,7 +8,6 @@ import { TenantStatusGuard } from '../common/tenant-status.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { GoogleStrategy } from './google.strategy';
-import { MailService } from './mail.service';
 
 @Global()
 @Module({
@@ -16,7 +15,6 @@ import { MailService } from './mail.service';
   controllers: [AuthController],
   providers: [
     AuthService,
-    MailService,
     GoogleStrategy,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: TenantStatusGuard },

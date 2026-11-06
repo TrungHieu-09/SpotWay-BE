@@ -25,7 +25,7 @@ async function bootstrap() {
     .addServer(process.env.API_PRODUCTION_URL ?? 'https://api.example.com', 'Production')
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'bearerAuth')
     .addTag('System', 'System health and service status')
-    .addTag('Authentication', 'Registration, JWT sessions, and Google OAuth')
+    .addTag('Authentication', 'Login, JWT sessions, and Google OAuth for admin-provisioned accounts')
     .addTag('Buildings', 'Building and manager assignment APIs')
     .addTag('Floors', 'Floor management and publishing APIs')
     .addTag('Stores', 'Tenant-scoped store management APIs')
