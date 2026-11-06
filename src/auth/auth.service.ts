@@ -1,12 +1,14 @@
 import {
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { ServicePackage, TenantStatus, User, UserRole } from '@prisma/client';
+import { TenantStatus, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../database/prisma.service';
@@ -46,13 +48,13 @@ export class AuthService {
       where: { email: normalized, usedAt: null },
     });
 
-    // Store hashed OTP + pending user data
+    // Store hashed OTP + pending user data. The password is only ever kept as a bcrypt hash.
     await this.prisma.emailOtp.create({
       data: {
         email: normalized,
         codeHash,
         fullName: fullName?.trim() || null,
-        password,
+        password: await bcrypt.hash(password, 12),
         expiresAt,
       },
     });
@@ -99,17 +101,17 @@ export class AuthService {
       });
     }
 
-    // Mark OTP as used
+    // Mark OTP as used and drop the stored password material: it is no longer needed.
     await this.prisma.emailOtp.update({
       where: { id: otpEntry.id },
-      data: { usedAt: new Date() },
+      data: { usedAt: new Date(), password: null },
     });
 
     // Create the user now
     const user = await this.prisma.user.create({
       data: {
         email: normalized,
-        passwordHash: await bcrypt.hash(otpEntry.password || '', 12),
+        passwordHash: await this.toPasswordHash(otpEntry.password),
         role: UserRole.GUEST,
       },
     });
@@ -305,117 +307,68 @@ export class AuthService {
     }
   }
 
-  async createWorkspace(userId: string, name: string, subdomain: string) {
-    const trimmedName = name?.trim();
-    if (!trimmedName) {
-      throw new BadRequestException({
-        code: 'INVALID_NAME',
-        message: 'Tên tổ chức/workspace không được để trống',
-      });
-    }
-
-    const cleanSubdomain = (subdomain || '')
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9-]/g, '');
-
-    if (!cleanSubdomain || cleanSubdomain.length < 3) {
-      throw new BadRequestException({
-        code: 'INVALID_SUBDOMAIN',
-        message: 'Tên miền định danh phải có ít nhất 3 ký tự (chỉ gồm chữ thường, số, dấu gạch ngang)',
-      });
-    }
-
-    // Check if subdomain already exists
-    const existingTenant = await this.prisma.tenant.findFirst({
-      where: { subdomain: cleanSubdomain, deletedAt: null },
-    });
-    if (existingTenant) {
-      throw new ConflictException({
-        code: 'SUBDOMAIN_EXISTS',
-        message: `Tên miền workspace "${cleanSubdomain}.spotway.app" đã được sử dụng. Vui lòng chọn tên khác.`,
-      });
-    }
-
+  /**
+   * Workspaces are no longer created for free: an Owner buys a plan first (see BillingService),
+   * and the workspace is provisioned when that order is paid. This stays idempotent for users
+   * who already own a workspace and otherwise tells the client that payment is required.
+   */
+  async createWorkspace(userId: string) {
     const currentUser = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       include: { tenant: true },
     });
-
-    // If user already belongs to an active tenant, return it
     if (currentUser.tenantId && currentUser.tenant && !currentUser.tenant.deletedAt) {
-      const tokens = await this.issueTokens(currentUser);
-      return {
-        tenant: {
-          id: currentUser.tenant.id,
-          name: currentUser.tenant.name,
-          subdomain: currentUser.tenant.subdomain,
-          status: currentUser.tenant.status.toLowerCase(),
-        },
-        user: {
-          id: currentUser.id,
-          email: currentUser.email,
-          name: currentUser.email.split('@')[0],
-          role: currentUser.role.toLowerCase(),
-          tenantId: currentUser.tenant.id,
-          tenant: {
-            id: currentUser.tenant.id,
-            name: currentUser.tenant.name,
-            subdomain: currentUser.tenant.subdomain,
-            status: currentUser.tenant.status.toLowerCase(),
-          },
-        },
-        ...tokens,
-      };
+      return this.issueSession(userId);
     }
-
-    // Create tenant in DB and assign to this user
-    const result = await this.prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({
-        data: {
-          name: trimmedName,
-          subdomain: cleanSubdomain,
-          servicePackage: ServicePackage.FREE,
-          status: TenantStatus.ACTIVE,
-        },
-      });
-
-      const updatedUser = await tx.user.update({
-        where: { id: userId },
-        data: {
-          tenantId: tenant.id,
-          role: currentUser.role === UserRole.ADMIN ? UserRole.ADMIN : UserRole.BUILDING_OWNER,
-        },
-        include: { tenant: true },
-      });
-
-      return { tenant, user: updatedUser };
-    });
-
-    const tokens = await this.issueTokens(result.user);
-
-    return {
-      tenant: {
-        id: result.tenant.id,
-        name: result.tenant.name,
-        subdomain: result.tenant.subdomain,
-        status: result.tenant.status.toLowerCase(),
+    throw new HttpException(
+      {
+        code: 'PAYMENT_REQUIRED',
+        message: 'Bạn cần mua gói dịch vụ trước khi tạo workspace.',
       },
+      HttpStatus.PAYMENT_REQUIRED,
+    );
+  }
+
+  /** Fresh tokens plus the user/tenant payload the frontend stores after login-like events. */
+  async issueSession(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: { tenant: true },
+    });
+    const tokens = await this.issueTokens(user);
+    const tenant =
+      user.tenant && !user.tenant.deletedAt
+        ? {
+            id: user.tenant.id,
+            name: user.tenant.name,
+            subdomain: user.tenant.subdomain,
+            status: user.tenant.status.toLowerCase(),
+            planId: user.tenant.servicePackage,
+            planExpiresAt: user.tenant.planExpiresAt?.toISOString() ?? null,
+            createdAt: user.tenant.createdAt.toISOString(),
+          }
+        : null;
+    return {
+      tenant,
       user: {
-        id: result.user.id,
-        email: result.user.email,
-        name: result.user.email.split('@')[0],
-        role: result.user.role.toLowerCase(),
-        tenantId: result.tenant.id,
-        tenant: {
-          id: result.tenant.id,
-          name: result.tenant.name,
-          subdomain: result.tenant.subdomain,
-          status: result.tenant.status.toLowerCase(),
-        },
+        id: user.id,
+        email: user.email,
+        name: user.email.split('@')[0],
+        role: user.role.toLowerCase(),
+        tenantId: tenant?.id ?? null,
+        tenant,
       },
       ...tokens,
     };
+  }
+
+  /**
+   * OTP rows hold a bcrypt hash. Rows written before that change still hold the plain password, so hash those
+   * here; a missing password gets an unusable hash so the account can only be entered via password reset.
+   */
+  private async toPasswordHash(stored: string | null) {
+    if (stored && /^\$2[aby]\$\d{2}\$/.test(stored)) return stored;
+    return bcrypt.hash(stored ?? randomBytes(32).toString('hex'), 12);
   }
 
   private generateOtp(): string {

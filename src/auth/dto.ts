@@ -56,19 +56,3 @@ export class OAuthExchangeDto {
   code!: string;
 }
 
-export class CreateWorkspaceDto {
-  @ApiProperty({ example: 'Metro Transit Authority' })
-  @IsString()
-  @MinLength(2)
-  name!: string;
-
-  @ApiProperty({ example: 'metro-transit' })
-  @IsString()
-  @MinLength(2)
-  subdomain!: string;
-
-  @ApiPropertyOptional({ example: 'airport' })
-  @IsString()
-  @IsOptional()
-  orgType?: string;
-}

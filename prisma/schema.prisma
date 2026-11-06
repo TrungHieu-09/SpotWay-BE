@@ -22,8 +22,20 @@ enum TenantStatus {
 
 enum ServicePackage {
   FREE
+  STARTER
   PRO
   ENTERPRISE
+}
+
+enum OrderKind {
+  NEW_WORKSPACE
+  RENEWAL
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELLED
 }
 
 enum BuildingStatus {
@@ -83,6 +95,7 @@ model Tenant {
   name           String
   subdomain      String         @unique
   servicePackage ServicePackage @default(FREE)
+  planExpiresAt  DateTime?      @map("plan_expires_at")
   status         TenantStatus   @default(ACTIVE)
   archived       Boolean        @default(false)
   createdAt      DateTime       @default(now()) @map("created_at")
@@ -90,8 +103,32 @@ model Tenant {
   deletedAt      DateTime?      @map("deleted_at")
   users          User[]
   buildings      Building[]
+  orders         PlanOrder[]
 
   @@map("tenants")
+}
+
+model PlanOrder {
+  id            String         @id @default(uuid())
+  userId        String         @map("user_id")
+  tenantId      String?        @map("tenant_id")
+  kind          OrderKind
+  plan          ServicePackage
+  months        Int
+  amountVnd     Int            @map("amount_vnd")
+  status        OrderStatus    @default(PENDING)
+  workspaceName String?        @map("workspace_name")
+  subdomain     String?
+  paymentRef    String?        @unique @map("payment_ref")
+  paidAt        DateTime?      @map("paid_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id])
+
+  @@index([userId, status])
+  @@index([tenantId, status])
+  @@map("plan_orders")
 }
 
 model User {
@@ -107,6 +144,7 @@ model User {
   tenant       Tenant?            @relation(fields: [tenantId], references: [id])
   sessions     RefreshSession[]
   oauthCodes   OAuthCode[]
+  orders       PlanOrder[]
   assignments  StaffAssignment[]
   stores       Store[]            @relation("StoreOwner")
   mapRevisions FloorMapRevision[] @relation("MapRevisionAuthor")

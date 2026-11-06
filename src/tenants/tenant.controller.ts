@@ -1,7 +1,10 @@
 import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ServicePackage, UserRole } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { CreateRenewalOrderDto } from '../billing/billing.dto';
+import { BillingService } from '../billing/billing.service';
+import { PLANS } from '../billing/plans';
 import { CurrentUser } from '../common/current-user.decorator';
 import { AuthUser } from '../common/auth.types';
 import { Roles } from '../common/roles.decorator';
@@ -13,7 +16,7 @@ import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
 @Controller('tenant')
 @Roles(UserRole.BUILDING_OWNER, UserRole.ADMIN)
 export class TenantController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly billing: BillingService) {}
 
   @Get('overview')
   @ApiOperation({ summary: 'Get current tenant overview, plan and usage' })
@@ -56,8 +59,7 @@ export class TenantController {
       this.prisma.promotion.count({ where: { store: { tenantId }, status: 'ACTIVE' } }),
     ]);
 
-    const isEnterprise = tenant.servicePackage === ServicePackage.ENTERPRISE;
-    const isPro = tenant.servicePackage === ServicePackage.PRO;
+    const plan = PLANS[tenant.servicePackage];
 
     return {
       tenant: {
@@ -66,21 +68,17 @@ export class TenantController {
         subdomain: tenant.subdomain,
         planId: tenant.servicePackage,
         status: tenant.status.toLowerCase(),
-        planExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        planExpiresAt: (tenant.planExpiresAt ?? tenant.createdAt).toISOString(),
         createdAt: tenant.createdAt.toISOString(),
       },
       plan: {
-        id: tenant.servicePackage,
-        name: isEnterprise
-          ? 'Gói Doanh Nghiệp (Enterprise)'
-          : isPro
-            ? 'Gói Chuyên Nghiệp (Pro)'
-            : 'Gói Khởi Đầu (Starter)',
-        maxBuildings: isEnterprise ? 100 : isPro ? 10 : 3,
-        maxManagers: isEnterprise ? 50 : isPro ? 10 : 2,
-        maxStoreOwners: isEnterprise ? 500 : isPro ? 50 : 10,
-        priceVnd: isEnterprise ? 4999000 : isPro ? 1999000 : 0,
-        durationMonths: 12,
+        id: plan.id,
+        name: plan.name,
+        maxBuildings: plan.maxBuildings,
+        maxManagers: plan.maxManagers,
+        maxStoreOwners: plan.maxStoreOwners,
+        priceVnd: plan.priceVnd,
+        durationMonths: plan.durationMonths,
       },
       usage: {
         buildings: buildingsCount,
@@ -198,42 +196,23 @@ export class TenantController {
   @ApiOperation({ summary: 'List available plans' })
   @ApiEnvelopeResponse(200, 'Plans returned successfully')
   getPlans() {
-    return [
-      {
-        id: 'FREE',
-        name: 'Gói Khởi Đầu (Starter)',
-        maxBuildings: 3,
-        maxManagers: 2,
-        maxStoreOwners: 10,
-        priceVnd: 0,
-        durationMonths: 12,
-      },
-      {
-        id: 'PRO',
-        name: 'Gói Chuyên Nghiệp (Pro)',
-        maxBuildings: 10,
-        maxManagers: 10,
-        maxStoreOwners: 50,
-        priceVnd: 1999000,
-        durationMonths: 12,
-      },
-      {
-        id: 'ENTERPRISE',
-        name: 'Gói Doanh Nghiệp (Enterprise)',
-        maxBuildings: 100,
-        maxManagers: 50,
-        maxStoreOwners: 500,
-        priceVnd: 4999000,
-        durationMonths: 12,
-      },
-    ];
+    return this.billing.listPlans();
   }
 
   @Get('invoices')
-  @ApiOperation({ summary: 'List invoices' })
+  @ApiOperation({ summary: 'List paid invoices of the current workspace' })
   @ApiEnvelopeResponse(200, 'Invoices returned successfully')
-  getInvoices() {
-    return [];
+  @ApiStandardErrors()
+  getInvoices(@CurrentUser() user: AuthUser) {
+    return this.billing.listInvoices(user.tenantId);
+  }
+
+  @Post('subscription/renew')
+  @ApiOperation({ summary: 'Start a renewal/upgrade order; pay it with POST /billing/orders/:id/pay' })
+  @ApiEnvelopeResponse(201, 'Renewal order created successfully')
+  @ApiStandardErrors()
+  renew(@CurrentUser() user: AuthUser, @Body() dto: CreateRenewalOrderDto) {
+    return this.billing.createRenewalOrder(user, dto);
   }
 }
 
