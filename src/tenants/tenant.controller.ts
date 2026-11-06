@@ -2,9 +2,6 @@ import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post } 
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { CreateRenewalOrderDto } from '../billing/billing.dto';
-import { BillingService } from '../billing/billing.service';
-import { PLANS } from '../billing/plans';
 import { CurrentUser } from '../common/current-user.decorator';
 import { AuthUser } from '../common/auth.types';
 import { Roles } from '../common/roles.decorator';
@@ -16,7 +13,7 @@ import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
 @Controller('tenant')
 @Roles(UserRole.BUILDING_OWNER, UserRole.ADMIN)
 export class TenantController {
-  constructor(private readonly prisma: PrismaService, private readonly billing: BillingService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   @Get('overview')
   @ApiOperation({ summary: 'Get current tenant overview, plan and usage' })
@@ -59,26 +56,13 @@ export class TenantController {
       this.prisma.promotion.count({ where: { store: { tenantId }, status: 'ACTIVE' } }),
     ]);
 
-    const plan = PLANS[tenant.servicePackage];
-
     return {
       tenant: {
         id: tenant.id,
         name: tenant.name,
         subdomain: tenant.subdomain,
-        planId: tenant.servicePackage,
         status: tenant.status.toLowerCase(),
-        planExpiresAt: (tenant.planExpiresAt ?? tenant.createdAt).toISOString(),
         createdAt: tenant.createdAt.toISOString(),
-      },
-      plan: {
-        id: plan.id,
-        name: plan.name,
-        maxBuildings: plan.maxBuildings,
-        maxManagers: plan.maxManagers,
-        maxStoreOwners: plan.maxStoreOwners,
-        priceVnd: plan.priceVnd,
-        durationMonths: plan.durationMonths,
       },
       usage: {
         buildings: buildingsCount,
@@ -190,29 +174,6 @@ export class TenantController {
       data: { deletedAt: new Date() },
     });
     return { success: true };
-  }
-
-  @Get('plans')
-  @ApiOperation({ summary: 'List available plans' })
-  @ApiEnvelopeResponse(200, 'Plans returned successfully')
-  getPlans() {
-    return this.billing.listPlans();
-  }
-
-  @Get('invoices')
-  @ApiOperation({ summary: 'List paid invoices of the current workspace' })
-  @ApiEnvelopeResponse(200, 'Invoices returned successfully')
-  @ApiStandardErrors()
-  getInvoices(@CurrentUser() user: AuthUser) {
-    return this.billing.listInvoices(user.tenantId);
-  }
-
-  @Post('subscription/renew')
-  @ApiOperation({ summary: 'Start a renewal/upgrade order; pay it with POST /billing/orders/:id/pay' })
-  @ApiEnvelopeResponse(201, 'Renewal order created successfully')
-  @ApiStandardErrors()
-  renew(@CurrentUser() user: AuthUser, @Body() dto: CreateRenewalOrderDto) {
-    return this.billing.createRenewalOrder(user, dto);
   }
 }
 

@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { AnalyticsModule } from './analytics/analytics.module';
-import { BillingModule } from './billing/billing.module';
 import { BuildingsModule } from './buildings/buildings.module';
 import { DatabaseModule } from './database/database.module';
 import { FloorsModule } from './floors/floors.module';
@@ -15,7 +15,7 @@ import { QrModule } from './qr/qr.module';
 import { TenantsModule } from './tenants/tenants.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), DatabaseModule, AnalyticsModule, AuthModule, BillingModule, TenantsModule, BuildingsModule, FloorsModule, StoresModule, PromotionsModule, GraphModule, QrModule, NavigationModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), DatabaseModule, AnalyticsModule, AuthModule, AdminModule,TenantsModule, BuildingsModule, FloorsModule, StoresModule, PromotionsModule, GraphModule, QrModule, NavigationModule],
   controllers: [HealthController],
 })
 export class AppModule {}
