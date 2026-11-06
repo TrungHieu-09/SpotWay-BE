@@ -16,7 +16,7 @@ export interface PlanDefinition {
 }
 
 export const PLANS: Record<ServicePackage, PlanDefinition> = {
-  FREE: { id: 'FREE', name: 'Gói Dùng Thử (Legacy)', maxBuildings: 3, maxManagers: 2, maxStoreOwners: 10, priceVnd: 0, monthlyPriceVnd: 0, durationMonths: 12, purchasable: false },
+  FREE: { id: 'FREE', name: 'Gói Dùng Thử Miễn Phí', maxBuildings: 3, maxManagers: 2, maxStoreOwners: 10, priceVnd: 0, monthlyPriceVnd: 0, durationMonths: 12, purchasable: false },
   STARTER: { id: 'STARTER', name: 'Gói Khởi Đầu (Starter)', maxBuildings: 5, maxManagers: 3, maxStoreOwners: 30, priceVnd: 1_990_000, monthlyPriceVnd: 2_490_000, durationMonths: 12, purchasable: true },
   PRO: { id: 'PRO', name: 'Gói Chuyên Nghiệp (Pro)', maxBuildings: 1000, maxManagers: 100, maxStoreOwners: 1000, priceVnd: 4_990_000, monthlyPriceVnd: 6_290_000, durationMonths: 12, purchasable: true },
   ENTERPRISE: { id: 'ENTERPRISE', name: 'Gói Doanh Nghiệp (Enterprise)', maxBuildings: 10_000, maxManagers: 1000, maxStoreOwners: 10_000, priceVnd: 0, monthlyPriceVnd: 0, durationMonths: 12, purchasable: false },
