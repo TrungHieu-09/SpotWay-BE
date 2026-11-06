@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Post,
   Query,
   Redirect,
@@ -26,6 +27,7 @@ import {
   OAuthExchangeDto,
   RefreshDto,
   ChangePasswordDto,
+  UpdateProfileDto,
 } from "./dto";
 import {
   ApiAuthTokenResponse,
@@ -94,28 +96,19 @@ export class AuthController {
   @ApiStandardErrors()
   async me(@Req() request: Request & { user?: AuthUser }) {
     const authUser = request.user!;
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: authUser.userId },
-      include: { tenant: true },
-    });
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.email.split("@")[0],
-      role: user.role.toLowerCase() as string,
-      tenantId: user.tenantId,
-      status: "active",
-      mustChangePassword: false,
-      createdAt: user.createdAt,
-      tenant: user.tenant
-        ? {
-            id: user.tenant.id,
-            name: user.tenant.name,
-            subdomain: user.tenant.subdomain,
-            status: user.tenant.status.toLowerCase(),
-          }
-        : null,
-    };
+    return this.auth.getProfile(authUser.userId);
+  }
+
+  @Patch("profile")
+  @ApiBearerAuth("bearerAuth")
+  @ApiOperation({ summary: "Update current authenticated user display name" })
+  @ApiStandardErrors()
+  async updateProfile(
+    @Req() request: Request & { user?: AuthUser },
+    @Body() dto: UpdateProfileDto,
+  ) {
+    const authUser = request.user!;
+    return this.auth.updateProfile(authUser.userId, dto.name);
   }
 
   @Public()

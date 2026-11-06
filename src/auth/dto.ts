@@ -35,3 +35,11 @@ export class ChangePasswordDto {
   newPassword!: string;
 }
 
+export class UpdateProfileDto {
+  @ApiProperty({ description: 'Display name of the user', example: 'Nguyễn Văn A' })
+  @IsString()
+  @MinLength(2)
+  name!: string;
+}
+
+
