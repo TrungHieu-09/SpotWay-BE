@@ -3,6 +3,8 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { Public } from '../common/public.decorator';
+import { CurrentUser } from '../common/current-user.decorator';
+import { AuthUser } from '../common/auth.types';
 import { AuthService } from './auth.service';
 import { LoginDto, OAuthExchangeDto, RefreshDto, RegisterDto } from './dto';
 import { ApiAuthTokenResponse, ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
@@ -13,6 +15,7 @@ export class AuthController {
   @Public() @Post('login') @ApiOperation({ summary: 'Login with email and password' }) @ApiAuthTokenResponse(201, 'Login successful') @ApiStandardErrors() login(@Body() dto: LoginDto) { return this.auth.login(dto.email, dto.password); }
   @Public() @Post('refresh') @ApiOperation({ summary: 'Rotate a refresh token pair' }) @ApiAuthTokenResponse(201, 'Token pair refreshed successfully') @ApiStandardErrors() refresh(@Body() dto: RefreshDto) { return this.auth.refresh(dto.refreshToken); }
   @Public() @Post('logout') @ApiOperation({ summary: 'Revoke a refresh token' }) @ApiEnvelopeResponse(201, 'Logout successful', { type: 'object', properties: { loggedOut: { type: 'boolean', example: true } } }) @ApiStandardErrors() logout(@Body() dto: RefreshDto) { return this.auth.logout(dto.refreshToken); }
+  @Get('me') @ApiOperation({ summary: 'Get the authenticated user profile' }) @ApiStandardErrors() me(@CurrentUser() user: AuthUser) { return this.auth.me(user.userId); }
   @Public() @Get('google') @UseGuards(AuthGuard('google')) @ApiOperation({ summary: 'Start Google OAuth in a browser' }) @ApiResponse({ status: 302, description: 'Redirects to Google consent screen' }) google() { return; }
   @Public() @Get('google/callback') @UseGuards(AuthGuard('google')) @ApiOperation({ summary: 'Google OAuth callback' }) @ApiResponse({ status: 302, description: 'Redirects to frontend callback with a one-time code' }) async googleCallback(@Req() request: Request, @Res() response: Response) {
     const code = await this.auth.googleLogin(request.user as { googleId: string; email?: string; emailVerified: boolean });

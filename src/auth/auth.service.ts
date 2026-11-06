@@ -30,6 +30,21 @@ export class AuthService {
     return this.issueTokens(session.user);
   }
   async logout(refreshToken: string) { try { const payload = await this.jwt.verifyAsync<{ sid: string }>(refreshToken, { secret: process.env.JWT_REFRESH_SECRET }); await this.prisma.refreshSession.updateMany({ where: { id: payload.sid, revokedAt: null }, data: { revokedAt: new Date() } }); } catch { /* logout remains idempotent */ } return { loggedOut: true }; }
+  async me(userId: string) {
+    const user = await this.prisma.user.findFirstOrThrow({ where: { id: userId, deletedAt: null } });
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role.toLowerCase(),
+      tenantId: user.tenantId,
+      name: user.email.split('@')[0],
+      createdByUserId: null,
+      mustChangePassword: false,
+      status: 'active',
+      createdAt: user.createdAt.toISOString(),
+      tenant: null,
+    };
+  }
   async googleLogin(profile: GoogleProfile) {
     if (!profile.emailVerified || !profile.email) throw new ForbiddenException({ code: 'GOOGLE_EMAIL_UNVERIFIED', message: 'Google account must have a verified email' });
     const email = profile.email.toLowerCase();
