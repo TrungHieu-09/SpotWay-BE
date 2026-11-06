@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { TenantStatus, User, UserRole } from '@prisma/client';
+import { ServicePackage, TenantStatus, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../database/prisma.service';
@@ -303,6 +303,119 @@ export class AuthService {
         message: 'Tenant is suspended',
       });
     }
+  }
+
+  async createWorkspace(userId: string, name: string, subdomain: string) {
+    const trimmedName = name?.trim();
+    if (!trimmedName) {
+      throw new BadRequestException({
+        code: 'INVALID_NAME',
+        message: 'Tên tổ chức/workspace không được để trống',
+      });
+    }
+
+    const cleanSubdomain = (subdomain || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9-]/g, '');
+
+    if (!cleanSubdomain || cleanSubdomain.length < 3) {
+      throw new BadRequestException({
+        code: 'INVALID_SUBDOMAIN',
+        message: 'Tên miền định danh phải có ít nhất 3 ký tự (chỉ gồm chữ thường, số, dấu gạch ngang)',
+      });
+    }
+
+    // Check if subdomain already exists
+    const existingTenant = await this.prisma.tenant.findFirst({
+      where: { subdomain: cleanSubdomain, deletedAt: null },
+    });
+    if (existingTenant) {
+      throw new ConflictException({
+        code: 'SUBDOMAIN_EXISTS',
+        message: `Tên miền workspace "${cleanSubdomain}.spotway.app" đã được sử dụng. Vui lòng chọn tên khác.`,
+      });
+    }
+
+    const currentUser = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: { tenant: true },
+    });
+
+    // If user already belongs to an active tenant, return it
+    if (currentUser.tenantId && currentUser.tenant && !currentUser.tenant.deletedAt) {
+      const tokens = await this.issueTokens(currentUser);
+      return {
+        tenant: {
+          id: currentUser.tenant.id,
+          name: currentUser.tenant.name,
+          subdomain: currentUser.tenant.subdomain,
+          status: currentUser.tenant.status.toLowerCase(),
+        },
+        user: {
+          id: currentUser.id,
+          email: currentUser.email,
+          name: currentUser.email.split('@')[0],
+          role: currentUser.role.toLowerCase(),
+          tenantId: currentUser.tenant.id,
+          tenant: {
+            id: currentUser.tenant.id,
+            name: currentUser.tenant.name,
+            subdomain: currentUser.tenant.subdomain,
+            status: currentUser.tenant.status.toLowerCase(),
+          },
+        },
+        ...tokens,
+      };
+    }
+
+    // Create tenant in DB and assign to this user
+    const result = await this.prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.create({
+        data: {
+          name: trimmedName,
+          subdomain: cleanSubdomain,
+          servicePackage: ServicePackage.FREE,
+          status: TenantStatus.ACTIVE,
+        },
+      });
+
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          tenantId: tenant.id,
+          role: currentUser.role === UserRole.ADMIN ? UserRole.ADMIN : UserRole.BUILDING_OWNER,
+        },
+        include: { tenant: true },
+      });
+
+      return { tenant, user: updatedUser };
+    });
+
+    const tokens = await this.issueTokens(result.user);
+
+    return {
+      tenant: {
+        id: result.tenant.id,
+        name: result.tenant.name,
+        subdomain: result.tenant.subdomain,
+        status: result.tenant.status.toLowerCase(),
+      },
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.email.split('@')[0],
+        role: result.user.role.toLowerCase(),
+        tenantId: result.tenant.id,
+        tenant: {
+          id: result.tenant.id,
+          name: result.tenant.name,
+          subdomain: result.tenant.subdomain,
+          status: result.tenant.status.toLowerCase(),
+        },
+      },
+      ...tokens,
+    };
   }
 
   private generateOtp(): string {

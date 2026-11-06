@@ -4,7 +4,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { Public } from '../common/public.decorator';
 import { AuthService } from './auth.service';
-import { LoginDto, OAuthExchangeDto, RefreshDto, RegisterDto, VerifyEmailDto, ResendOtpDto } from './dto';
+import { LoginDto, OAuthExchangeDto, RefreshDto, RegisterDto, VerifyEmailDto, ResendOtpDto, CreateWorkspaceDto } from './dto';
 import { ApiAuthTokenResponse, ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
@@ -100,6 +100,18 @@ export class AuthController {
           }
         : null,
     };
+  }
+
+  @Post('workspace')
+  @ApiBearerAuth('bearerAuth')
+  @ApiOperation({ summary: 'Create workspace/tenant for current authenticated user' })
+  @ApiStandardErrors()
+  createWorkspace(
+    @Req() request: Request & { user?: AuthUser },
+    @Body() dto: CreateWorkspaceDto,
+  ) {
+    const authUser = request.user!;
+    return this.auth.createWorkspace(authUser.userId, dto.name, dto.subdomain);
   }
 
   @Public()
