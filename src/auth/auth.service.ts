@@ -4,14 +4,18 @@ import {
   UnauthorizedException,
   BadRequestException,
   NotFoundException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { TenantStatus, User } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'crypto';
-import { PrismaService } from '../database/prisma.service';
+} from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import { TenantStatus, User } from "@prisma/client";
+import * as bcrypt from "bcrypt";
+import { createHash, randomBytes } from "crypto";
+import { PrismaService } from "../database/prisma.service";
 
-type GoogleProfile = { googleId: string; email?: string; emailVerified: boolean };
+type GoogleProfile = {
+  googleId: string;
+  email?: string;
+  emailVerified: boolean;
+};
 
 @Injectable()
 export class AuthService {
@@ -31,8 +35,8 @@ export class AuthService {
       !(await bcrypt.compare(password, user.passwordHash))
     ) {
       throw new UnauthorizedException({
-        code: 'INVALID_CREDENTIALS',
-        message: 'Invalid email or password',
+        code: "INVALID_CREDENTIALS",
+        message: "Invalid email or password",
       });
     }
     this.assertTenantActive(user);
@@ -47,8 +51,8 @@ export class AuthService {
       });
     } catch {
       throw new UnauthorizedException({
-        code: 'INVALID_REFRESH_TOKEN',
-        message: 'Invalid refresh token',
+        code: "INVALID_REFRESH_TOKEN",
+        message: "Invalid refresh token",
       });
     }
     const session = await this.prisma.refreshSession.findUnique({
@@ -62,8 +66,8 @@ export class AuthService {
       !(await bcrypt.compare(refreshToken, session.tokenHash))
     ) {
       throw new UnauthorizedException({
-        code: 'INVALID_REFRESH_TOKEN',
-        message: 'Refresh token has been revoked or expired',
+        code: "INVALID_REFRESH_TOKEN",
+        message: "Refresh token has been revoked or expired",
       });
     }
     this.assertTenantActive(session.user);
@@ -90,11 +94,15 @@ export class AuthService {
     return { loggedOut: true };
   }
 
-  async changePassword(userId: string, currentPassword?: string, newPassword?: string) {
+  async changePassword(
+    userId: string,
+    currentPassword?: string,
+    newPassword?: string,
+  ) {
     if (!newPassword || newPassword.length < 8) {
       throw new BadRequestException({
-        code: 'INVALID_PASSWORD',
-        message: 'Mật khẩu mới phải có tối thiểu 8 ký tự',
+        code: "INVALID_PASSWORD",
+        message: "Mật khẩu mới phải có tối thiểu 8 ký tự",
       });
     }
 
@@ -104,8 +112,8 @@ export class AuthService {
 
     if (!user) {
       throw new NotFoundException({
-        code: 'USER_NOT_FOUND',
-        message: 'Không tìm thấy tài khoản người dùng',
+        code: "USER_NOT_FOUND",
+        message: "Không tìm thấy tài khoản người dùng",
       });
     }
 
@@ -113,15 +121,15 @@ export class AuthService {
     if (user.passwordHash) {
       if (!currentPassword) {
         throw new BadRequestException({
-          code: 'CURRENT_PASSWORD_REQUIRED',
-          message: 'Vui lòng nhập mật khẩu hiện tại',
+          code: "CURRENT_PASSWORD_REQUIRED",
+          message: "Vui lòng nhập mật khẩu hiện tại",
         });
       }
       const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!isMatch) {
         throw new BadRequestException({
-          code: 'INCORRECT_CURRENT_PASSWORD',
-          message: 'Mật khẩu hiện tại không chính xác',
+          code: "INCORRECT_CURRENT_PASSWORD",
+          message: "Mật khẩu hiện tại không chính xác",
         });
       }
     }
@@ -134,15 +142,15 @@ export class AuthService {
 
     return {
       success: true,
-      message: 'Mật khẩu đã được cập nhật thành công.',
+      message: "Mật khẩu đã được cập nhật thành công.",
     };
   }
 
   async googleLogin(profile: GoogleProfile) {
     if (!profile.emailVerified || !profile.email) {
       throw new ForbiddenException({
-        code: 'GOOGLE_EMAIL_UNVERIFIED',
-        message: 'Google account must have a verified email',
+        code: "GOOGLE_EMAIL_UNVERIFIED",
+        message: "Google account must have a verified email",
       });
     }
     // Accounts are created by an admin: Google can only sign in an email that already has one.
@@ -152,8 +160,8 @@ export class AuthService {
     });
     if (!existing) {
       throw new ForbiddenException({
-        code: 'ACCOUNT_NOT_PROVISIONED',
-        message: 'Tài khoản chưa được cấp. Vui lòng liên hệ quản trị viên.',
+        code: "ACCOUNT_NOT_PROVISIONED",
+        message: "Tài khoản chưa được cấp. Vui lòng liên hệ quản trị viên.",
       });
     }
     const user = await this.prisma.user.update({
@@ -162,7 +170,7 @@ export class AuthService {
       include: { tenant: true },
     });
     this.assertTenantActive(user);
-    const code = randomBytes(32).toString('base64url');
+    const code = randomBytes(32).toString("base64url");
     await this.prisma.oAuthCode.create({
       data: {
         userId: user.id,
@@ -183,8 +191,8 @@ export class AuthService {
     });
     if (!entry) {
       throw new UnauthorizedException({
-        code: 'INVALID_OAUTH_CODE',
-        message: 'OAuth code is invalid or expired',
+        code: "INVALID_OAUTH_CODE",
+        message: "OAuth code is invalid or expired",
       });
     }
     const claimed = await this.prisma.oAuthCode.updateMany({
@@ -193,8 +201,8 @@ export class AuthService {
     });
     if (claimed.count !== 1) {
       throw new UnauthorizedException({
-        code: 'INVALID_OAUTH_CODE',
-        message: 'OAuth code is invalid or expired',
+        code: "INVALID_OAUTH_CODE",
+        message: "OAuth code is invalid or expired",
       });
     }
     const user = await this.prisma.user.findUniqueOrThrow({
@@ -209,14 +217,14 @@ export class AuthService {
   ) {
     if (user.tenant?.status === TenantStatus.SUSPENDED) {
       throw new ForbiddenException({
-        code: 'TENANT_SUSPENDED',
-        message: 'Tenant is suspended',
+        code: "TENANT_SUSPENDED",
+        message: "Tenant is suspended",
       });
     }
   }
 
   private hashCode(code: string) {
-    return createHash('sha256').update(code).digest('hex');
+    return createHash("sha256").update(code).digest("hex");
   }
 
   private parseTtl(value: string | undefined, fallbackSeconds: number) {
@@ -234,7 +242,7 @@ export class AuthService {
       { userId: user.id, role: user.role, tenantId: user.tenantId },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: accessTtl },
     );
-    const sessionId = randomBytes(16).toString('hex');
+    const sessionId = randomBytes(16).toString("hex");
     const refreshToken = await this.jwt.signAsync(
       { sub: user.id, sid: sessionId },
       { secret: process.env.JWT_REFRESH_SECRET, expiresIn: refreshTtl },
@@ -247,6 +255,6 @@ export class AuthService {
         expiresAt: new Date(Date.now() + refreshTtl * 1000),
       },
     });
-    return { accessToken, refreshToken, tokenType: 'Bearer' };
+    return { accessToken, refreshToken, tokenType: "Bearer" };
   }
 }

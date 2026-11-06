@@ -1,20 +1,31 @@
-import { withPoolLimit } from './prisma.service';
+import { withConnectionTimeouts } from "./prisma.service";
 
-describe('withPoolLimit', () => {
-  it('adds a connection_limit when the URL has none', () => {
-    const url = withPoolLimit('postgresql://u:p@host:5432/postgres', 5)!;
-    expect(new URL(url).searchParams.get('connection_limit')).toBe('5');
+describe("withConnectionTimeouts", () => {
+  const base =
+    "postgresql://user:pa%40ss@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres";
+
+  it("adds connect_timeout and pool_timeout (30 s) when missing and keeps the rest of the URL", () => {
+    const url = new URL(withConnectionTimeouts(base, {}));
+    expect(url.searchParams.get("connect_timeout")).toBe("30");
+    expect(url.searchParams.get("pool_timeout")).toBe("30");
+    expect(url.username).toBe("user");
+    expect(url.password).toBe("pa%40ss");
+    expect(url.host).toBe("aws-0-ap-southeast-2.pooler.supabase.com:5432");
+    expect(url.pathname).toBe("/postgres");
   });
 
-  it('keeps existing query params and an explicit connection_limit', () => {
-    const added = new URL(withPoolLimit('postgresql://u:p@localhost:5432/db?schema=public', 4)!);
-    expect(added.searchParams.get('schema')).toBe('public');
-    expect(added.searchParams.get('connection_limit')).toBe('4');
-    expect(new URL(withPoolLimit('postgresql://u:p@h/db?connection_limit=9', 4)!).searchParams.get('connection_limit')).toBe('9');
+  it("never overrides values already in the URL, and honours env overrides", () => {
+    const custom = new URL(
+      withConnectionTimeouts(`${base}?connect_timeout=7&pgbouncer=true`, {
+        DB_POOL_TIMEOUT_S: "12",
+      } as never),
+    );
+    expect(custom.searchParams.get("connect_timeout")).toBe("7");
+    expect(custom.searchParams.get("pool_timeout")).toBe("12");
+    expect(custom.searchParams.get("pgbouncer")).toBe("true");
   });
 
-  it('passes through a missing or unparsable URL', () => {
-    expect(withPoolLimit(undefined)).toBeUndefined();
-    expect(withPoolLimit('not a url')).toBe('not a url');
+  it("returns an unparsable value unchanged", () => {
+    expect(withConnectionTimeouts("not a url")).toBe("not a url");
   });
 });

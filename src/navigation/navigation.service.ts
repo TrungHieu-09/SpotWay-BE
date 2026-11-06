@@ -239,7 +239,7 @@ export class NavigationService {
       this.prisma.connector.findMany({ where: { buildingId, deletedAt: null }, select: { id: true, kind: true, accessible: true, stops: { select: { nodeId: true, floor: { select: { floorNumber: true } } } } } }),
       floorIds.length ? this.prisma.node.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, x: true, y: true, type: true, accessible: true } }) : Promise.resolve([]),
       floorIds.length ? this.prisma.edge.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, fromNodeId: true, toNodeId: true, weight: true } }) : Promise.resolve([]),
-      floorIds.length ? this.prisma.poi.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, nodeId: true, name: true, category: true } }) : Promise.resolve([]),
+      floorIds.length ? this.prisma.poi.findMany({ where: { floorId: { in: floorIds }, deletedAt: null }, select: { id: true, floorId: true, nodeId: true, name: true, category: true, x: true, y: true } }) : Promise.resolve([]),
       floorIds.length ? this.prisma.store.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, status: StoreStatus.ACTIVE }, select: { id: true, floorId: true, nodeId: true, name: true, status: true } }) : Promise.resolve([]),
       floorIds.length ? this.prisma.floorMapRevision.findMany({ where: { floorId: { in: floorIds } }, distinct: ['floorId'], orderBy: [{ floorId: 'asc' }, { version: 'desc' }], select: { floorId: true, version: true, editorState: true, publishedAt: true } }) : Promise.resolve([]),
     ]);
