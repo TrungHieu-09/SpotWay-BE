@@ -4,6 +4,7 @@
  *   npm run demo:export            writes prisma/demo-data.json from the building in DEMO_BUILDING_ID (default: the demo mall)
  *   npm run demo:restore           upserts that snapshot into the database (idempotent) and (re)creates the demo accounts + QR codes
  *   npm run demo:restore -- --dry  only prints what would be written
+ *   npm run demo:polish            only renames the building and its POIs to the demo names (no restore)
  *
  * Accounts are never exported (no password hashes in git): restore creates the four seed accounts with the seed password
  * when they do not exist yet, and never changes the password of an existing one.
@@ -109,6 +110,7 @@ async function restoreSnapshot(dry: boolean) {
   if (firstStore) await db.store.update({ where: { id: firstStore.id }, data: { ownerId: storeOwner.id } });
 
   await restoreDemoStores(snapshot, tenantId, storeOwner.id);
+  await polishDemoData(snapshot.buildingId);
 
   console.log('\nQR codes (scan with the app, or type the token):');
   for (const qr of DEMO_QR) {
@@ -156,11 +158,46 @@ async function restoreDemoStores(snapshot: Snapshot, tenantId: string, storeOwne
   console.log(`Demo stores: ${DEMO_STORES.length} (with running promotions)`);
 }
 
+/** Real-looking names for the demo mall (the imported plan only has "POI 1…13"). Per floor, in reading order (top to bottom). */
+const DEMO_BUILDING = { name: 'SpotWay Plaza', address: '123 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh' };
+const DEMO_SHOP_NAMES: Record<number, string[]> = {
+  1: ['Phở 24', 'Starbucks', 'Bánh mì Huỳnh Hoa', 'Gong Cha', 'Pharmacity', 'Circle K', 'Quầy đổi tiền', 'Ngân hàng ACB', 'Miniso', 'Lotteria'],
+  2: ['Uniqlo', 'H&M', 'Mango', 'Converse', 'Charles & Keith', 'Adidas', 'Nón Sơn', 'Pedro'],
+  3: ['Điện Máy Xanh', 'FPT Shop', 'Apple Premium', 'Lego Store', 'Game Zone', 'Karaoke Neo', 'Sân trượt băng', 'Kids Plaza', 'Rạp Lotte Cinema', 'Spa Lavender', 'Khu ẩm thực'],
+};
+
+/** Renames the building and its points of interest. Idempotent: the same POI always gets the same name. */
+async function polishDemoData(buildingId: string) {
+  await db.building.update({ where: { id: buildingId }, data: DEMO_BUILDING });
+  const pois = (await db.poi.findMany({ where: { floor: { buildingId, deletedAt: null }, deletedAt: null }, include: { floor: { select: { floorNumber: true } } } })) as (Row & { floor: { floorNumber: number }; category: string; name: string; x: number | null; y: number | null })[];
+  pois.sort((a, b) => a.floor.floorNumber - b.floor.floorNumber || (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0) || a.id.localeCompare(b.id));
+  const used = new Map<number, number>();
+  const counters = { elevator: 0, exit: 0 };
+  let renamed = 0;
+  for (const poi of pois) {
+    let name = poi.name;
+    if (poi.category === 'ELEVATOR') name = `Thang máy ${String.fromCharCode(65 + counters.elevator++ % 26)}`;
+    else if (poi.category === 'EXIT') name = /thang/i.test(poi.name) ? `Thang bộ thoát hiểm T${poi.floor.floorNumber}` : `Lối thoát hiểm ${++counters.exit}`;
+    else if (poi.category === 'CUSTOM' && !/atm|wc|vệ sinh/i.test(poi.name)) {
+      const list = DEMO_SHOP_NAMES[poi.floor.floorNumber] ?? [];
+      const index = used.get(poi.floor.floorNumber) ?? 0;
+      used.set(poi.floor.floorNumber, index + 1);
+      name = list[index] ?? `Gian hàng ${poi.floor.floorNumber}${String(index + 1).padStart(2, '0')}`;
+    }
+    if (name !== poi.name) {
+      await db.poi.update({ where: { id: poi.id }, data: { name } });
+      renamed += 1;
+    }
+  }
+  console.log(`Polished: building "${DEMO_BUILDING.name}", ${renamed} POI renamed`);
+}
+
 async function main() {
   const [command, flag] = process.argv.slice(2);
   if (command === 'export') await exportSnapshot();
   else if (command === 'restore') await restoreSnapshot(flag === '--dry');
-  else throw new Error('Usage: ts-node prisma/demo-snapshot.ts export|restore [--dry]');
+  else if (command === 'polish') await polishDemoData(BUILDING_ID);
+  else throw new Error('Usage: ts-node prisma/demo-snapshot.ts export|restore [--dry]|polish');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());
