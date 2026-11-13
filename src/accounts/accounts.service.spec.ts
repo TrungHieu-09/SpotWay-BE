@@ -25,7 +25,7 @@ function setup() {
   const prisma: PrismaMock = {
     user: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), groupBy: jest.fn() },
     refreshSession: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-    staffAssignment: { deleteMany: jest.fn() },
+    staffAssignment: { deleteMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn() },
     store: { count: jest.fn().mockResolvedValue(0), groupBy: jest.fn().mockResolvedValue([]), findMany: jest.fn() },
     building: { count: jest.fn().mockResolvedValue(3) },
     $transaction: jest.fn(),
