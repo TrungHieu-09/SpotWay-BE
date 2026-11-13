@@ -9,7 +9,7 @@ import { PrismaService } from '../database/prisma.service';
 import { AnalyticsService } from './analytics.service';
 
 /** Events only the guest app can know about (it routes on the phone, so the backend never sees these). */
-export const CLIENT_EVENT_TYPES = ['SEARCH_PERFORMED', 'ROUTE_STARTED', 'ROUTE_COMPLETED', 'EVACUATION_STARTED', 'STORE_VIEWED'] as const;
+export const CLIENT_EVENT_TYPES = ['SEARCH_PERFORMED', 'ROUTE_STARTED', 'ROUTE_COMPLETED', 'EVACUATION_STARTED', 'STORE_VIEWED', 'HELP_REQUESTED', 'SAFE_REACHED'] as const;
 export type ClientEventType = (typeof CLIENT_EVENT_TYPES)[number];
 
 export class ClientEventDto {
@@ -18,6 +18,8 @@ export class ClientEventDto {
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() floorId?: string;
   @ApiPropertyOptional({ description: 'Store or POI id the user is heading to / looking at' }) @IsOptional() @IsUUID() targetId?: string;
   @ApiPropertyOptional({ maxLength: 80 }) @IsOptional() @IsString() @MaxLength(80) query?: string;
+  @ApiPropertyOptional({ description: 'HELP_REQUESTED only: what the guest needs', enum: ['LOST', 'WHEELCHAIR', 'SMOKE', 'OTHER'] }) @IsOptional() @IsIn(['LOST', 'WHEELCHAIR', 'SMOKE', 'OTHER']) helpKind?: 'LOST' | 'WHEELCHAIR' | 'SMOKE' | 'OTHER';
+  @ApiPropertyOptional({ description: 'Node the guest is standing at (help requests)', format: 'uuid' }) @IsOptional() @IsUUID() nodeId?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10000) resultCount?: number;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(100000) distanceMeters?: number;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(86400) durationSeconds?: number;
@@ -38,7 +40,7 @@ export class ClientEventsController {
     const context: Record<string, unknown> = { source: 'mobile' };
     if (dto.targetId) context.toStoreId = dto.targetId;
     if (dto.query !== undefined) context.query = dto.query.trim().toLowerCase();
-    for (const key of ['resultCount', 'distanceMeters', 'durationSeconds'] as const) if (dto[key] !== undefined) context[key] = dto[key];
+    for (const key of ['resultCount', 'distanceMeters', 'durationSeconds', 'helpKind', 'nodeId'] as const) if (dto[key] !== undefined) context[key] = dto[key];
     await this.analytics.enqueue({ eventType: dto.eventType, tenantId: building.tenantId, buildingId: building.id, floorId: dto.floorId ?? null, context }).catch(() => undefined);
     return { accepted: true };
   }

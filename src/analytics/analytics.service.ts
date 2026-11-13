@@ -4,7 +4,7 @@ import { MongoService } from './mongo.service';
 import { PrismaService } from '../database/prisma.service';
 
 export type NavigationEvent = {
-  eventType: 'MAP_VIEWED' | 'SEARCH_PERFORMED' | 'ROUTE_REQUESTED' | 'ROUTE_RESOLVED' | 'ROUTE_NOT_FOUND' | 'QR_SCANNED' | 'ROUTE_STARTED' | 'ROUTE_COMPLETED' | 'EVACUATION_STARTED' | 'STORE_VIEWED';
+  eventType: 'MAP_VIEWED' | 'SEARCH_PERFORMED' | 'ROUTE_REQUESTED' | 'ROUTE_RESOLVED' | 'ROUTE_NOT_FOUND' | 'QR_SCANNED' | 'ROUTE_STARTED' | 'ROUTE_COMPLETED' | 'EVACUATION_STARTED' | 'STORE_VIEWED' | 'HELP_REQUESTED' | 'SAFE_REACHED';
   tenantId: string; buildingId: string; floorId?: string | null;
   context?: Record<string, unknown>;
 };
@@ -72,6 +72,8 @@ export class AnalyticsService {
       },
       qrScans: counts.QR_SCANNED ?? 0,
       storeViews: counts.STORE_VIEWED ?? 0,
+      helpRequests: counts.HELP_REQUESTED ?? 0,
+      safeReached: counts.SAFE_REACHED ?? 0,
     };
   }
 }

@@ -34,4 +34,12 @@ describe('ClientEventsController', () => {
     analytics.enqueue.mockRejectedValue(new Error('db down'));
     await expect(controller.record({ eventType: 'ROUTE_COMPLETED', buildingId: 'b1', durationSeconds: 60 })).resolves.toEqual({ accepted: true });
   });
+
+  it('records help requests with the kind and the node, and safe arrivals', async () => {
+    const { controller, analytics } = setup({ id: 'b1', tenantId: 't1' });
+    await controller.record({ eventType: 'HELP_REQUESTED', buildingId: 'b1', helpKind: 'WHEELCHAIR', nodeId: 'n1' });
+    expect(analytics.enqueue.mock.calls[0][0]).toMatchObject({ eventType: 'HELP_REQUESTED', context: { helpKind: 'WHEELCHAIR', nodeId: 'n1' } });
+    await controller.record({ eventType: 'SAFE_REACHED', buildingId: 'b1' });
+    expect(analytics.enqueue.mock.calls[1][0].eventType).toBe('SAFE_REACHED');
+  });
 });
