@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
+import { STORE_WITH_BUILDING, serializeStore } from '../stores/store-serializer';
 import { ADMIN_ASSIGNABLE_ROLES, CreateAdminUserDto, CreateStaffDto } from './accounts.dto';
 
 const BCRYPT_ROUNDS = 12;
@@ -20,15 +21,15 @@ type StaffPatch = { status?: 'active' | 'locked'; resetPassword?: boolean };
 export class AccountsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Shape the FE expects (lowercase role, active/locked status, display name). */
-  toDto(user: User) {
+  /** Shape the FE expects (lowercase role, active/locked status, display name). `areaIds` are the buildings a manager is assigned to. */
+  toDto(user: User & { assignments?: { buildingId: string }[] }) {
     return {
       id: user.id,
       tenantId: user.tenantId,
       role: user.role.toLowerCase(),
       name: user.name?.trim() || user.email.split('@')[0],
       email: user.email,
-      areaIds: [] as string[],
+      areaIds: (user.assignments ?? []).map((assignment) => assignment.buildingId),
       createdByUserId: null as string | null,
       mustChangePassword: user.mustChangePassword,
       status: user.status === UserAccountStatus.LOCKED ? 'locked' : 'active',
@@ -159,19 +160,46 @@ export class AccountsService {
 
   async tenantUsers(user: AuthUser) {
     const tenantId = this.requireTenant(user);
-    const users = await this.prisma.user.findMany({ where: { tenantId, role: { in: STAFF_ROLES }, deletedAt: null }, orderBy: { createdAt: 'desc' } });
+    const users = await this.prisma.user.findMany({ where: { tenantId, role: { in: STAFF_ROLES }, deletedAt: null }, include: { assignments: { select: { buildingId: true } } }, orderBy: { createdAt: 'desc' } });
     return users.map((item) => this.toDto(item));
+  }
+
+  /** FE "areas" are the workspace's buildings. */
+  async tenantAreas(user: AuthUser) {
+    const tenantId = this.requireTenant(user);
+    const buildings = await this.prisma.building.findMany({ where: { tenantId, deletedAt: null }, orderBy: { createdAt: 'asc' } });
+    return buildings.map((building) => ({ id: building.id, tenantId, buildingId: building.id, name: building.name, description: building.address ?? undefined, color: '#2563eb', createdAt: building.createdAt.toISOString() }));
   }
 
   async createStaff(user: AuthUser, dto: CreateStaffDto) {
     const tenantId = this.requireTenant(user);
     const temporaryPassword = dto.password ?? this.generatePassword();
     const created = await this.createUser({ email: dto.email.trim().toLowerCase(), name: dto.name.trim(), role: ROLE_OF[dto.role], tenantId }, temporaryPassword);
-    return { ...this.toDto(created), temporaryPassword };
+    if (created.role === UserRole.BUILDING_MANAGER && dto.areaIds?.length) await this.syncAssignments(tenantId, created.id, dto.areaIds);
+    return { ...this.toDto(created), areaIds: created.role === UserRole.BUILDING_MANAGER ? await this.assignedBuildings(created.id) : [], temporaryPassword };
   }
 
-  async updateStaff(user: AuthUser, id: string, patch: StaffPatch) {
-    return this.applyPatch(await this.findManaged(this.requireTenant(user), id, STAFF_ROLES), patch);
+  async updateStaff(user: AuthUser, id: string, patch: StaffPatch & { areaIds?: string[] }) {
+    const tenantId = this.requireTenant(user);
+    const target = await this.findManaged(tenantId, id, STAFF_ROLES);
+    if (patch.areaIds !== undefined && target.role === UserRole.BUILDING_MANAGER) await this.syncAssignments(tenantId, target.id, patch.areaIds);
+    const result = await this.applyPatch(target, patch);
+    return { ...result, areaIds: target.role === UserRole.BUILDING_MANAGER ? await this.assignedBuildings(target.id) : [] };
+  }
+
+  private async assignedBuildings(userId: string) {
+    return (await this.prisma.staffAssignment.findMany({ where: { userId }, select: { buildingId: true } })).map((row) => row.buildingId);
+  }
+
+  /** Makes the manager's building assignments exactly `buildingIds` (all must belong to the workspace). */
+  private async syncAssignments(tenantId: string, userId: string, buildingIds: string[]) {
+    const unique = [...new Set(buildingIds)];
+    const valid = await this.prisma.building.findMany({ where: { id: { in: unique }, tenantId, deletedAt: null }, select: { id: true } });
+    if (valid.length !== unique.length) throw new BadRequestException({ code: 'BUILDING_NOT_FOUND', message: 'One or more buildings do not belong to this workspace' });
+    await this.prisma.$transaction([
+      this.prisma.staffAssignment.deleteMany({ where: { userId, buildingId: { notIn: unique } } }),
+      this.prisma.staffAssignment.createMany({ data: unique.map((buildingId) => ({ userId, buildingId })), skipDuplicates: true }),
+    ]);
   }
 
   async deleteStaff(user: AuthUser, id: string) {
@@ -212,7 +240,7 @@ export class AccountsService {
     } else if (user.role !== UserRole.ADMIN) {
       where.tenantId = this.requireTenant(user);
     }
-    return this.prisma.store.findMany({ where, orderBy: { createdAt: 'desc' } });
+    return (await this.prisma.store.findMany({ where, include: STORE_WITH_BUILDING, orderBy: { createdAt: 'desc' } })).map(serializeStore);
   }
 
   // ---- Admin ----------------------------------------------------------------------------------

@@ -27,8 +27,8 @@ export class TenantWorkspaceController {
   constructor(private readonly accounts: AccountsService) {}
   @Get('overview') @ApiOperation({ summary: 'Workspace summary of the Building Owner' }) @ApiEnvelopeResponse(200, 'Overview returned') @ApiStandardErrors()
   overview(@CurrentUser() user: AuthUser) { return this.accounts.tenantOverview(user); }
-  @Get('areas') @ApiOperation({ summary: 'Areas (not modelled by the backend: always empty)' }) @ApiEnvelopeResponse(200, 'Areas returned') @ApiStandardErrors()
-  areas() { return []; }
+  @Get('areas') @ApiOperation({ summary: 'Areas = the buildings of the workspace a manager can be assigned to' }) @ApiEnvelopeResponse(200, 'Areas returned') @ApiStandardErrors()
+  areas(@CurrentUser() user: AuthUser) { return this.accounts.tenantAreas(user); }
   @Get('users') @ApiOperation({ summary: 'Managers and store owners of the workspace' }) @ApiEnvelopeResponse(200, 'Users returned') @ApiStandardErrors()
   users(@CurrentUser() user: AuthUser) { return this.accounts.tenantUsers(user); }
   @Post('users') @ApiOperation({ summary: 'Create a manager or store owner (returns a temporary password)' }) @ApiEnvelopeResponse(201, 'Account created') @ApiStandardErrors()
