@@ -15,6 +15,10 @@ export type IncidentState = { active: false } | ActiveIncident;
 @Injectable()
 export class IncidentsService {
   private readonly incidents = new Map<string, ActiveIncident>();
+  /** Which exit each evacuating phone currently heads for. Entries expire when a phone stops reporting. */
+  private readonly claims = new Map<string, Map<string, { exitNodeId: string; at: number }>>();
+  private readonly knownNodes = new Map<string, Set<string>>();
+  static readonly CLAIM_TTL_MS = 20_000;
   constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService) {}
 
   private read(buildingId: string): IncidentState {
@@ -42,12 +46,56 @@ export class IncidentsService {
   async clear(user: AuthUser, buildingId: string) {
     await this.access.building(user, buildingId);
     this.incidents.delete(buildingId);
+    this.claims.delete(buildingId);
     return { active: false as const };
   }
 
   async state(user: AuthUser, buildingId: string) {
     await this.access.building(user, buildingId);
-    return this.read(buildingId);
+    const incident = this.read(buildingId);
+    return incident.active ? { ...incident, evacuees: this.evacuees(buildingId), exits: this.loads(buildingId) } : incident;
+  }
+
+  private live(buildingId: string) {
+    const map = this.claims.get(buildingId);
+    if (!map) return [];
+    const now = Date.now();
+    for (const [device, claim] of map) if (now - claim.at > IncidentsService.CLAIM_TTL_MS) map.delete(device);
+    return [...map.entries()];
+  }
+
+  /** Number of phones currently evacuating. */
+  evacuees(buildingId: string) { return this.live(buildingId).length; }
+
+  /** People per exit, not counting `exceptDevice` (a phone asks how crowded the exits are for everyone else). */
+  loads(buildingId: string, exceptDevice?: string) {
+    const loads: Record<string, number> = {};
+    for (const [device, claim] of this.live(buildingId)) if (device !== exceptDevice) loads[claim.exitNodeId] = (loads[claim.exitNodeId] ?? 0) + 1;
+    return loads;
+  }
+
+  async publicLoads(buildingId: string, deviceId?: string) {
+    const state = await this.publicState(buildingId);
+    return { active: state.active, loads: state.active ? this.loads(buildingId, deviceId) : {} };
+  }
+
+  /** A phone says which exit it is walking to; returns how crowded the other exits are. Ignored when there is no incident. */
+  async claim(buildingId: string, deviceId: string, exitNodeId: string) {
+    const state = await this.publicState(buildingId);
+    if (!state.active) return { active: false as const, loads: {} };
+    let known = this.knownNodes.get(buildingId);
+    if (!known?.has(exitNodeId)) {
+      const exists = await this.prisma.node.count({ where: { id: exitNodeId, deletedAt: null, floor: { buildingId, deletedAt: null } } });
+      if (!exists) throw new BadRequestException({ code: 'EXIT_NODE_INVALID', message: 'Exit does not belong to this building' });
+      known = known ?? new Set();
+      known.add(exitNodeId);
+      this.knownNodes.set(buildingId, known);
+    }
+    let map = this.claims.get(buildingId);
+    if (!map) this.claims.set(buildingId, (map = new Map()));
+    if (map.size >= 5000 && !map.has(deviceId)) this.live(buildingId);
+    map.set(deviceId, { exitNodeId, at: Date.now() });
+    return { active: true as const, loads: this.loads(buildingId, deviceId) };
   }
 
   /** What the guest app polls: only for a building that is publicly available. */

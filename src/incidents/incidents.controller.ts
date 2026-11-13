@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
@@ -7,7 +7,7 @@ import { Public } from '../common/public.decorator';
 import { RateLimit } from '../common/rate-limit.guard';
 import { Roles } from '../common/roles.decorator';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
-import { StartIncidentDto } from './incidents.dto';
+import { ClaimExitDto, StartIncidentDto } from './incidents.dto';
 import { IncidentsService } from './incidents.service';
 
 const staff = [UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.BUILDING_MANAGER];
@@ -26,6 +26,11 @@ export class IncidentsController {
 @ApiTags('Public Navigation') @Public() @Controller('public/buildings/:buildingId/incident')
 export class PublicIncidentController {
   constructor(private readonly incidents: IncidentsService) {}
-  @Get() @RateLimit(240, 60_000) @ApiOperation({ summary: 'Is there an emergency in this building? Polled by the guest app' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Incident state returned') @ApiStandardErrors()
+  @Get() @RateLimit(1200, 60_000) @ApiOperation({ summary: 'Is there an emergency in this building? Polled by the guest app' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Incident state returned') @ApiStandardErrors()
   state(@Param('buildingId', ParseUUIDPipe) buildingId: string) { return this.incidents.publicState(buildingId); }
+
+  @Get('/evacuation') @RateLimit(1200, 60_000) @ApiOperation({ summary: 'How many other phones are heading to each exit (used to spread people over the exits)' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Exit loads returned') @ApiStandardErrors()
+  loads(@Param('buildingId', ParseUUIDPipe) buildingId: string, @Query('deviceId') deviceId?: string) { return this.incidents.publicLoads(buildingId, deviceId); }
+  @Post('/evacuation/claim') @HttpCode(200) @RateLimit(1200, 60_000) @ApiOperation({ summary: 'A phone reports which exit it is walking to' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Claim recorded') @ApiStandardErrors()
+  claim(@Param('buildingId', ParseUUIDPipe) buildingId: string, @Body() dto: ClaimExitDto) { return this.incidents.claim(buildingId, dto.deviceId, dto.exitNodeId); }
 }

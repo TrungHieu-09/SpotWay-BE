@@ -1,6 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
+export class ClaimExitDto {
+  @ApiProperty({ format: 'uuid', description: 'Random id the phone keeps while the app is open (no account, no personal data)' }) @IsUUID() deviceId!: string;
+  @ApiProperty({ format: 'uuid' }) @IsUUID() exitNodeId!: string;
+}
+
 export const INCIDENT_TYPES = ['FIRE'] as const;
 
 export class StartIncidentDto {
