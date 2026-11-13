@@ -181,9 +181,8 @@ async function polishNodeNames(buildingId: string) {
     else if (node.type === 'STAIR') name = 'Thang bộ';
     else if (node.type === 'ESCALATOR') name = 'Thang cuốn';
     else if (node.type === 'EXIT' || node.type === 'EMERGENCY_EXIT') {
-      exits += 1;
       if (/thang/i.test(node.name ?? '')) name = 'Thang bộ thoát hiểm';
-      else if (!node.name || /^\s*poi\b/i.test(node.name)) name = `Lối thoát hiểm ${exits}`;
+      else if (!node.name || /^\s*poi\b/i.test(node.name) || /^Lối thoát hiểm \d+$/.test(node.name)) name = `Lối thoát hiểm ${++exits}`;
     }
     if (name !== node.name) {
       await db.node.update({ where: { id: node.id }, data: { name } });
