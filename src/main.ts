@@ -10,9 +10,12 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   // Lets Ctrl+C / SIGTERM run PrismaService.onModuleDestroy so DB connections are released instead of lingering.
   app.enableShutdownHooks();
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (isProduction) app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.setGlobalPrefix('api/v1');
   const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean);
-  app.enableCors({ origin: corsOrigins.length ? corsOrigins : true, credentials: true });
+  app.enableCors({ // An empty allow-list is only acceptable in development (any origin); production must list its origins.
+    origin: corsOrigins.length ? corsOrigins : !isProduction, credentials: true });
   app.use(cookieParser());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   app.useGlobalInterceptors(new ResponseInterceptor());
@@ -38,7 +41,7 @@ async function bootstrap() {
     .build();
   const document = SwaggerModule.createDocument(app, config);
   document.openapi = '3.0.3';
-  SwaggerModule.setup('api/docs', app, document);
+  if (!isProduction || process.env.SWAGGER_ENABLED === 'true') SwaggerModule.setup('api/docs', app, document);
   await app.listen(Number(process.env.PORT ?? 3000));
 }
 bootstrap();

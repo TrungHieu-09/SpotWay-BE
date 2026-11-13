@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types'; import { CurrentUser } from '../common/current-user.decorator'; import { Public } from '../common/public.decorator'; import { Roles } from '../common/roles.decorator'; import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
@@ -6,6 +6,7 @@ import { CreatePromotionDto, UpdatePromotionDto } from './promotions.dto'; impor
 @ApiTags('Promotions') @Controller()
 export class PromotionsController {
   constructor(private readonly promotions: PromotionsService) {}
+  @Get('public/buildings/:buildingId/promotions') @Public() @ApiOperation({ summary: 'List every promotion running now in a building' }) @ApiEnvelopeResponse(200, 'Promotions returned successfully') @ApiStandardErrors() publicByBuilding(@Param('buildingId', ParseUUIDPipe) buildingId: string) { return this.promotions.publicByBuilding(buildingId); }
   @Get('public/stores/:storeId/promotions') @Public() @ApiOperation({ summary: 'List currently valid public promotions' }) @ApiEnvelopeResponse(200, 'Promotions returned successfully') @ApiStandardErrors() publicList(@Param('storeId') storeId: string) { return this.promotions.publicList(storeId); }
   @Get('stores/:storeId/promotions') @ApiBearerAuth('bearerAuth') @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.STORE_OWNER) @ApiOperation({ summary: 'List store promotions' }) @ApiEnvelopeResponse(200, 'Promotions returned successfully') @ApiStandardErrors() list(@CurrentUser() user: AuthUser, @Param('storeId') storeId: string) { return this.promotions.list(user, storeId); }
   @Post('stores/:storeId/promotions') @ApiBearerAuth('bearerAuth') @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.STORE_OWNER) @ApiOperation({ summary: 'Create a store promotion' }) @ApiEnvelopeResponse(201, 'Promotion created successfully') @ApiStandardErrors() create(@CurrentUser() user: AuthUser, @Param('storeId') storeId: string, @Body() dto: CreatePromotionDto) { return this.promotions.create(user, storeId, dto); }

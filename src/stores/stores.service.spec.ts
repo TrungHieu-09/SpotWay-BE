@@ -11,7 +11,7 @@ describe('StoresService', () => {
       floor: { findFirst: jest.fn().mockResolvedValue(floor) },
       node: { findFirst: jest.fn().mockResolvedValue({ floorId: 'floor-2', tenantId: 'tenant-1' }) },
     } as any;
-    const service = new StoresService(prisma);
+    const service = new StoresService(prisma, {} as never);
     await expect(service.create(user, { floorId: floor.id, nodeId: '00000000-0000-4000-8000-000000000001', name: 'Test Store' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -20,7 +20,7 @@ describe('StoresService', () => {
       floor: { findFirst: jest.fn().mockResolvedValue(floor) },
       user: { findFirst: jest.fn().mockResolvedValue({ id: 'user-2', role: UserRole.BUILDING_MANAGER, tenantId: 'tenant-1' }) },
     } as any;
-    const service = new StoresService(prisma);
+    const service = new StoresService(prisma, {} as never);
     await expect(service.create(user, { floorId: floor.id, ownerId: '00000000-0000-4000-8000-000000000002', name: 'Test Store' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -30,7 +30,7 @@ describe('StoresService', () => {
       user: { findFirst: jest.fn().mockResolvedValue({ id: 'user-2', role: UserRole.STORE_OWNER, tenantId: 'tenant-1' }) },
       store: { findFirst: jest.fn().mockResolvedValue({ id: 'store-1' }) },
     } as any;
-    const service = new StoresService(prisma);
+    const service = new StoresService(prisma, {} as never);
     await expect(service.create(user, { floorId: floor.id, ownerId: '00000000-0000-4000-8000-000000000002', name: 'Test Store' })).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -41,8 +41,8 @@ describe('StoresService', () => {
       user: { findFirst: jest.fn().mockResolvedValue({ id: 'user-2', role: UserRole.STORE_OWNER, tenantId: floor.tenantId }) },
       store: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: 'store-2' }) },
     } as any;
-    const service = new StoresService(prisma);
-    await expect(service.create(user, { floorId: floor.id, nodeId: '00000000-0000-4000-8000-000000000003', ownerId: '00000000-0000-4000-8000-000000000002', name: ' Test Store ' })).resolves.toEqual({ id: 'store-2' });
+    const service = new StoresService(prisma, {} as never);
+    await expect(service.create(user, { floorId: floor.id, nodeId: '00000000-0000-4000-8000-000000000003', ownerId: '00000000-0000-4000-8000-000000000002', name: ' Test Store ' })).resolves.toEqual({ id: 'store-2', buildingId: null });
     expect(prisma.store.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ name: 'Test Store', tenantId: floor.tenantId }) }));
   });
 });

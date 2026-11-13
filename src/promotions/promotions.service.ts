@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PromotionStatus, UserRole } from '@prisma/client';
+import { BuildingStatus, FloorPublishStatus, PromotionStatus, StoreStatus, TenantStatus, UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
 import { CreatePromotionDto, UpdatePromotionDto } from './promotions.dto';
@@ -51,5 +51,28 @@ export class PromotionsService {
       },
       orderBy: { endAt: 'asc' },
     });
+  }
+
+  /** Every promotion running now in a publicly available building, with the store it belongs to (one call for the guest app). */
+  async publicByBuilding(buildingId: string) {
+    const now = new Date();
+    const promotions = await this.prisma.promotion.findMany({
+      where: {
+        deletedAt: null, status: PromotionStatus.ACTIVE, startAt: { lte: now }, endAt: { gt: now },
+        store: {
+          is: {
+            deletedAt: null, status: StoreStatus.ACTIVE, nodeId: { not: null },
+            floor: { is: { deletedAt: null, publishStatus: FloorPublishStatus.PUBLISHED, buildingId, building: { is: { deletedAt: null, status: BuildingStatus.ACTIVE, tenant: { is: { deletedAt: null, archived: false, status: TenantStatus.ACTIVE } } } } } },
+          },
+        },
+      },
+      include: { store: { select: { id: true, name: true, floorId: true, nodeId: true } } },
+      orderBy: { endAt: 'asc' },
+      take: 200,
+    });
+    return promotions.map((promotion) => ({
+      id: promotion.id, title: promotion.title, description: promotion.description, startAt: promotion.startAt, endAt: promotion.endAt,
+      storeId: promotion.store.id, storeName: promotion.store.name, floorId: promotion.store.floorId, nodeId: promotion.store.nodeId,
+    }));
   }
 }

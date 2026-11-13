@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Patch,
   Post,
   Query,
   Redirect,
@@ -14,37 +13,30 @@ import {
   ApiOperation,
   ApiResponse,
   ApiTags,
-  ApiBearerAuth,
 } from "@nestjs/swagger";
 import { AuthGuard } from "@nestjs/passport";
 import { Request, Response } from "express";
 import { Public } from "../common/public.decorator";
-import { CurrentUser } from "../common/current-user.decorator";
-import { AuthUser } from "../common/auth.types";
+import { RateLimit } from "../common/rate-limit.guard";
 import { AuthService } from "./auth.service";
 import {
   LoginDto,
   OAuthExchangeDto,
   RefreshDto,
-  ChangePasswordDto,
-  UpdateProfileDto,
 } from "./dto";
 import {
   ApiAuthTokenResponse,
   ApiEnvelopeResponse,
   ApiStandardErrors,
 } from "../common/swagger";
-import { PrismaService } from "../database/prisma.service";
 
 @ApiTags("Authentication")
 @Controller("auth")
 export class AuthController {
-  constructor(
-    private readonly auth: AuthService,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly auth: AuthService) {}
 
   @Public()
+  @RateLimit(20, 60_000)
   @Post("login")
   @ApiOperation({ summary: "Login with email and password" })
   @ApiAuthTokenResponse(201, "Login successful")
@@ -54,6 +46,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit(60, 60_000)
   @Post("refresh")
   @ApiOperation({ summary: "Rotate a refresh token pair" })
   @ApiAuthTokenResponse(201, "Token pair refreshed successfully")
@@ -72,43 +65,6 @@ export class AuthController {
   @ApiStandardErrors()
   logout(@Body() dto: RefreshDto) {
     return this.auth.logout(dto.refreshToken);
-  }
-
-  @Post("change-password")
-  @ApiBearerAuth("bearerAuth")
-  @ApiOperation({ summary: "Change or set user password" })
-  @ApiStandardErrors()
-  changePassword(
-    @Req() request: Request & { user?: AuthUser },
-    @Body() dto: ChangePasswordDto,
-  ) {
-    const authUser = request.user!;
-    return this.auth.changePassword(
-      authUser.userId,
-      dto.currentPassword,
-      dto.newPassword,
-    );
-  }
-
-  @Get("me")
-  @ApiBearerAuth("bearerAuth")
-  @ApiOperation({ summary: "Get current authenticated user profile" })
-  @ApiStandardErrors()
-  async me(@Req() request: Request & { user?: AuthUser }) {
-    const authUser = request.user!;
-    return this.auth.getProfile(authUser.userId);
-  }
-
-  @Patch("profile")
-  @ApiBearerAuth("bearerAuth")
-  @ApiOperation({ summary: "Update current authenticated user display name" })
-  @ApiStandardErrors()
-  async updateProfile(
-    @Req() request: Request & { user?: AuthUser },
-    @Body() dto: UpdateProfileDto,
-  ) {
-    const authUser = request.user!;
-    return this.auth.updateProfile(authUser.userId, dto.name);
   }
 
   @Public()
@@ -148,6 +104,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit(20, 60_000)
   @Post("oauth/exchange")
   @ApiOperation({ summary: "Exchange one-time OAuth code for JWT tokens" })
   @ApiAuthTokenResponse(201, "OAuth exchange successful")

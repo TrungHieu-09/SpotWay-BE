@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserAccountStatus {
+  ACTIVE
+  LOCKED
+}
+
 enum UserRole {
   ADMIN
   BUILDING_OWNER
@@ -132,22 +137,25 @@ model PlanOrder {
 }
 
 model User {
-  id           String             @id @default(uuid())
-  tenantId     String?            @map("tenant_id")
-  email        String             @unique
-  passwordHash String?            @map("password_hash")
-  googleId     String?            @unique @map("google_id")
-  role         UserRole           @default(GUEST)
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @updatedAt @map("updated_at")
-  deletedAt    DateTime?          @map("deleted_at")
-  tenant       Tenant?            @relation(fields: [tenantId], references: [id])
-  sessions     RefreshSession[]
-  oauthCodes   OAuthCode[]
-  orders       PlanOrder[]
-  assignments  StaffAssignment[]
-  stores       Store[]            @relation("StoreOwner")
-  mapRevisions FloorMapRevision[] @relation("MapRevisionAuthor")
+  id                 String             @id @default(uuid())
+  tenantId           String?            @map("tenant_id")
+  email              String             @unique
+  passwordHash       String?            @map("password_hash")
+  googleId           String?            @unique @map("google_id")
+  role               UserRole           @default(GUEST)
+  name               String?
+  status             UserAccountStatus  @default(ACTIVE)
+  mustChangePassword Boolean            @default(false) @map("must_change_password")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  deletedAt          DateTime?          @map("deleted_at")
+  tenant             Tenant?            @relation(fields: [tenantId], references: [id])
+  sessions           RefreshSession[]
+  oauthCodes         OAuthCode[]
+  orders             PlanOrder[]
+  assignments        StaffAssignment[]
+  stores             Store[]            @relation("StoreOwner")
+  mapRevisions       FloorMapRevision[] @relation("MapRevisionAuthor")
 
   @@index([tenantId, role])
   @@map("users")

@@ -2,11 +2,9 @@ import {
   ForbiddenException,
   Injectable,
   UnauthorizedException,
-  BadRequestException,
-  NotFoundException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { TenantStatus, User } from "@prisma/client";
+import { TenantStatus, User, UserAccountStatus } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { createHash, randomBytes } from "crypto";
 import { PrismaService } from "../database/prisma.service";
@@ -26,72 +24,6 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  private async ensureFullNameColumn() {
-    if (this.fullNameColReady) return;
-    try {
-      await this.prisma.$executeRawUnsafe(
-        'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "full_name" TEXT',
-      );
-      this.fullNameColReady = true;
-    } catch {
-      // ignore if concurrent or already exists
-    }
-  }
-
-  async getProfile(userId: string) {
-    await this.ensureFullNameColumn();
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      include: { tenant: true },
-    });
-
-    let customName: string | null = null;
-    try {
-      const rows = await this.prisma.$queryRaw<Array<{ full_name: string | null }>>`
-        SELECT "full_name" FROM "users" WHERE "id" = ${userId}::uuid LIMIT 1
-      `;
-      customName = rows[0]?.full_name?.trim() || null;
-    } catch {
-      customName = null;
-    }
-
-    return {
-      id: user.id,
-      email: user.email,
-      name: customName || user.email.split("@")[0],
-      role: user.role.toLowerCase() as string,
-      tenantId: user.tenantId,
-      status: "active",
-      mustChangePassword: false,
-      createdAt: user.createdAt,
-      tenant: user.tenant
-        ? {
-            id: user.tenant.id,
-            name: user.tenant.name,
-            subdomain: user.tenant.subdomain,
-            status: user.tenant.status.toLowerCase(),
-          }
-        : null,
-    };
-  }
-
-  async updateProfile(userId: string, name: string) {
-    const cleanName = (name ?? "").trim();
-    if (cleanName.length < 2 || cleanName.length > 80) {
-      throw new BadRequestException({
-        code: "INVALID_NAME",
-        message: "Tên hiển thị phải từ 2 đến 80 ký tự",
-      });
-    }
-    await this.ensureFullNameColumn();
-    await this.prisma.$executeRaw`
-      UPDATE "users"
-      SET "full_name" = ${cleanName}, "updated_at" = NOW()
-      WHERE "id" = ${userId}::uuid
-    `;
-    return this.getProfile(userId);
-  }
-
   // ── Authentication ──
   async login(email: string, password: string) {
     const user = await this.prisma.user.findFirst({
@@ -107,7 +39,7 @@ export class AuthService {
         message: "Invalid email or password",
       });
     }
-    this.assertTenantActive(user);
+    this.assertUsable(user);
     return this.issueTokens(user);
   }
 
@@ -138,7 +70,7 @@ export class AuthService {
         message: "Refresh token has been revoked or expired",
       });
     }
-    this.assertTenantActive(session.user);
+    this.assertUsable(session.user);
     await this.prisma.refreshSession.update({
       where: { id: session.id },
       data: { revokedAt: new Date() },
@@ -160,55 +92,6 @@ export class AuthService {
       /* logout remains idempotent */
     }
     return { loggedOut: true };
-  }
-
-  async changePassword(
-    userId: string,
-    currentPassword?: string,
-    newPassword?: string,
-  ) {
-    if (!newPassword || newPassword.length < 8) {
-      throw new BadRequestException({
-        code: "INVALID_PASSWORD",
-        message: "Mật khẩu mới phải có tối thiểu 8 ký tự",
-      });
-    }
-
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
-    });
-
-    if (!user) {
-      throw new NotFoundException({
-        code: "USER_NOT_FOUND",
-        message: "Không tìm thấy tài khoản người dùng",
-      });
-    }
-
-    // If the user already has a password set, currentPassword is required and must match
-    if (user.passwordHash) {
-      if (!currentPassword) {
-        throw new BadRequestException({
-          code: "CURRENT_PASSWORD_REQUIRED",
-          message: "Vui lòng nhập mật khẩu hiện tại",
-        });
-      }
-      const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
-      if (!isMatch) {
-        throw new BadRequestException({
-          code: "INCORRECT_CURRENT_PASSWORD",
-          message: "Mật khẩu hiện tại không chính xác",
-        });
-      }
-    }
-
-    const newHash = await bcrypt.hash(newPassword, 12);
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash: newHash },
-    });
-
-    return this.getProfile(user.id);
   }
 
   async googleLogin(profile: GoogleProfile) {
@@ -275,6 +158,14 @@ export class AuthService {
       include: { tenant: true },
     });
     return this.issueTokens(user);
+  }
+
+  /** A locked account can neither sign in nor refresh; a suspended tenant locks out all its users. */
+  private assertUsable(user: User & { tenant?: { status: TenantStatus } | null }) {
+    if (user.status === UserAccountStatus.LOCKED) {
+      throw new ForbiddenException({ code: "ACCOUNT_LOCKED", message: "This account is locked" });
+    }
+    this.assertTenantActive(user);
   }
 
   private assertTenantActive(

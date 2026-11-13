@@ -46,7 +46,7 @@ export class NavigationService {
       query.type === 'STORE' || query.type === 'POI' ? [] : this.prisma.node.findMany({ where: { floorId: { in: floorIds }, deletedAt: null, name: { not: null, ...(nameFilter ?? {}) } } }),
     ]);
     const items = [...stores.map((store) => ({ type: 'STORE' as const, id: store.id, name: store.name, floorId: store.floorId, nodeId: store.nodeId!, x: store.node!.x, y: store.node!.y })), ...pois.map((poi) => ({ type: 'POI' as const, id: poi.id, name: poi.name, floorId: poi.floorId, nodeId: poi.nodeId, x: poi.node.x, y: poi.node.y })), ...nodes.map((node) => ({ type: 'NODE' as const, id: node.id, name: node.name!, floorId: node.floorId, nodeId: node.id, x: node.x, y: node.y }))].sort((a, b) => a.name.localeCompare(b.name));
-    const total = items.length; void this.analytics.enqueue({ eventType: 'SEARCH_PERFORMED', tenantId: floors[0].tenantId, buildingId, context: { query: term ?? null, resultCount: total, type: query.type ?? 'ALL' } }).catch(() => undefined); return { items: items.slice((query.page - 1) * query.limit, query.page * query.limit), pagination: pageMeta(query.page, query.limit, total) };
+    const total = items.length; if (term) void this.analytics.enqueue({ eventType: 'SEARCH_PERFORMED', tenantId: floors[0].tenantId, buildingId, context: { query: term ?? null, resultCount: total, type: query.type ?? 'ALL' } }).catch(() => undefined); return { items: items.slice((query.page - 1) * query.limit, query.page * query.limit), pagination: pageMeta(query.page, query.limit, total) };
   }
 
   async route(dto: CreateRouteDto) {

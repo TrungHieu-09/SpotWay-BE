@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { AdminModule } from './admin/admin.module';
+import { AccountsModule } from './accounts/accounts.module';
 import { AuthModule } from './auth/auth.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { BuildingsModule } from './buildings/buildings.module';
 import { DatabaseModule } from './database/database.module';
 import { FloorsModule } from './floors/floors.module';
 import { GraphModule } from './graph/graph.module';
+import { IncidentsModule } from './incidents/incidents.module';
 import { HealthController } from './health.controller';
 import { NavigationModule } from './navigation/navigation.module';
 import { StoresModule } from './stores/stores.module';
@@ -15,7 +16,7 @@ import { QrModule } from './qr/qr.module';
 import { TenantsModule } from './tenants/tenants.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), DatabaseModule, AnalyticsModule, AuthModule, AdminModule,TenantsModule, BuildingsModule, FloorsModule, StoresModule, PromotionsModule, GraphModule, QrModule, NavigationModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), DatabaseModule, AnalyticsModule, AuthModule, AccountsModule, TenantsModule, BuildingsModule, FloorsModule, StoresModule, PromotionsModule, GraphModule, IncidentsModule, QrModule, NavigationModule],
   controllers: [HealthController],
 })
 export class AppModule {}
