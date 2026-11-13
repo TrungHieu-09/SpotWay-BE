@@ -166,17 +166,53 @@ const DEMO_SHOP_NAMES: Record<number, string[]> = {
   3: ['Điện Máy Xanh', 'FPT Shop', 'Apple Premium', 'Lego Store', 'Game Zone', 'Karaoke Neo', 'Sân trượt băng', 'Kids Plaza', 'Rạp Lotte Cinema', 'Spa Lavender', 'Khu ẩm thực'],
 };
 
+/**
+ * Names of lifts, stairs and exits as they appear in directions and evacuation ("Lối thoát: …"). The import left names such
+ * as "POI 11", "thang bo" or "thang mays". Plain corridor nodes stay unnamed. Idempotent.
+ */
+async function polishNodeNames(buildingId: string) {
+  const nodes = (await db.node.findMany({ where: { floor: { buildingId, deletedAt: null }, deletedAt: null }, include: { floor: { select: { floorNumber: true } } } })) as (Row & { type: string; name: string | null; x: number; y: number; floor: { floorNumber: number } })[];
+  nodes.sort((a, b) => a.floor.floorNumber - b.floor.floorNumber || a.y - b.y || a.x - b.x || a.id.localeCompare(b.id));
+  let exits = 0;
+  let renamed = 0;
+  for (const node of nodes) {
+    let name = node.name;
+    if (node.type === 'ELEVATOR') name = 'Thang máy';
+    else if (node.type === 'STAIR') name = 'Thang bộ';
+    else if (node.type === 'ESCALATOR') name = 'Thang cuốn';
+    else if (node.type === 'EXIT' || node.type === 'EMERGENCY_EXIT') {
+      exits += 1;
+      if (/thang/i.test(node.name ?? '')) name = 'Thang bộ thoát hiểm';
+      else if (!node.name || /^\s*poi\b/i.test(node.name)) name = `Lối thoát hiểm ${exits}`;
+    }
+    if (name !== node.name) {
+      await db.node.update({ where: { id: node.id }, data: { name } });
+      renamed += 1;
+    }
+  }
+  const labels: Record<string, string> = { ELEVATOR: 'Thang máy', STAIR: 'Thang bộ', ESCALATOR: 'Thang cuốn' };
+  const connectors = (await db.connector.findMany({ where: { buildingId, deletedAt: null } })) as (Row & { kind: string; name: string })[];
+  for (const connector of connectors) {
+    const name = labels[connector.kind];
+    if (name && connector.name !== name) {
+      await db.connector.update({ where: { id: connector.id }, data: { name } });
+      renamed += 1;
+    }
+  }
+  return renamed;
+}
+
 /** Renames the building and its points of interest. Idempotent: the same POI always gets the same name. */
 async function polishDemoData(buildingId: string) {
   await db.building.update({ where: { id: buildingId }, data: DEMO_BUILDING });
   const pois = (await db.poi.findMany({ where: { floor: { buildingId, deletedAt: null }, deletedAt: null }, include: { floor: { select: { floorNumber: true } } } })) as (Row & { floor: { floorNumber: number }; category: string; name: string; x: number | null; y: number | null })[];
   pois.sort((a, b) => a.floor.floorNumber - b.floor.floorNumber || (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0) || a.id.localeCompare(b.id));
   const used = new Map<number, number>();
-  const counters = { elevator: 0, exit: 0 };
+  const counters = { exit: 0 };
   let renamed = 0;
   for (const poi of pois) {
     let name = poi.name;
-    if (poi.category === 'ELEVATOR') name = `Thang máy ${String.fromCharCode(65 + counters.elevator++ % 26)}`;
+    if (poi.category === 'ELEVATOR') name = 'Thang máy';
     else if (poi.category === 'EXIT') name = /thang/i.test(poi.name) ? `Thang bộ thoát hiểm T${poi.floor.floorNumber}` : `Lối thoát hiểm ${++counters.exit}`;
     else if (poi.category === 'CUSTOM' && !/atm|wc|vệ sinh/i.test(poi.name)) {
       const list = DEMO_SHOP_NAMES[poi.floor.floorNumber] ?? [];
@@ -189,7 +225,8 @@ async function polishDemoData(buildingId: string) {
       renamed += 1;
     }
   }
-  console.log(`Polished: building "${DEMO_BUILDING.name}", ${renamed} POI renamed`);
+  const renamedNodes = await polishNodeNames(buildingId);
+  console.log(`Polished: building "${DEMO_BUILDING.name}", ${renamed} POI and ${renamedNodes} node/connector names renamed`);
 }
 
 async function main() {
