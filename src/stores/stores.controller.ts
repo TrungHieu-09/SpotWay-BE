@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, NotFoundException, ParseUUIDPipe, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { StoreStatus, UserRole } from '@prisma/client';
 import { IsArray, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
@@ -6,6 +6,7 @@ import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { PrismaService } from '../database/prisma.service';
+import { TenantAccessService } from '../common/tenant-access.service';
 import { PaginationQuery, pageMeta } from '../common/pagination';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
 import { StoresService } from './stores.service';
@@ -20,4 +21,20 @@ export class StoresController {
   @Patch(':id') @ApiOperation({ summary: 'Update a store' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Store updated successfully') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.STORE_OWNER) async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateStoreDto) { const store = await this.prisma.store.findFirstOrThrow({ where: { id, deletedAt: null } }); this.assertAccess(user, store); return this.prisma.store.update({ where: { id }, data: dto }); }
   @Delete(':id') @ApiOperation({ summary: 'Soft-delete a store' }) @ApiParam({ name: 'id', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Store deleted successfully') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER) async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) { const store = await this.prisma.store.findFirstOrThrow({ where: { id, deletedAt: null } }); this.assertAccess(user, store); return this.prisma.store.update({ where: { id }, data: { deletedAt: new Date() } }); }
   private assertAccess(user: AuthUser, store: { tenantId: string; ownerId: string | null }) { if (user.role !== UserRole.ADMIN && (store.tenantId !== user.tenantId || (user.role === UserRole.STORE_OWNER && store.ownerId !== user.userId))) throw new ForbiddenException({ code: 'STORE_ACCESS_DENIED', message: 'Store access is denied' }); }
+}
+
+@ApiTags('Stores') @ApiBearerAuth('bearerAuth') @Controller('floors')
+export class FloorStoresController {
+  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService) {}
+  @Get(':floorId/stores') @ApiOperation({ summary: 'List the stores of a floor' }) @ApiParam({ name: 'floorId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Stores returned successfully') @ApiStandardErrors() @Roles(UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.BUILDING_MANAGER, UserRole.STORE_OWNER)
+  async list(@CurrentUser() user: AuthUser, @Param('floorId', ParseUUIDPipe) floorId: string) {
+    const floor = await this.prisma.floor.findFirst({ where: { id: floorId, deletedAt: null }, select: { id: true, buildingId: true, tenantId: true } });
+    if (!floor) throw new NotFoundException({ code: 'FLOOR_NOT_FOUND', message: 'Floor was not found' });
+    if (user.role === UserRole.STORE_OWNER) {
+      if (floor.tenantId !== user.tenantId) throw new ForbiddenException({ code: 'TENANT_ACCESS_DENIED', message: 'Cross-tenant access is denied' });
+      return this.prisma.store.findMany({ where: { floorId, deletedAt: null, ownerId: user.userId }, orderBy: { name: 'asc' } });
+    }
+    await this.access.building(user, floor.buildingId);
+    return this.prisma.store.findMany({ where: { floorId, deletedAt: null }, orderBy: { name: 'asc' } });
+  }
 }

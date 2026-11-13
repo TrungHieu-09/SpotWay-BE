@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
-import { StoresController } from './stores.controller';
+import { BuildingsModule } from '../buildings/buildings.module';
+import { FloorStoresController, StoresController } from './stores.controller';
 import { StoresService } from './stores.service';
-@Module({ controllers: [StoresController], providers: [StoresService] }) export class StoresModule {}
+@Module({ imports: [BuildingsModule], controllers: [StoresController, FloorStoresController], providers: [StoresService] }) export class StoresModule {}

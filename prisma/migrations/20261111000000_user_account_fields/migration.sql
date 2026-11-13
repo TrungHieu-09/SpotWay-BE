@@ -1,0 +1,8 @@
+DO $$ BEGIN
+  CREATE TYPE "UserAccountStatus" AS ENUM ('ACTIVE', 'LOCKED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "name" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "status" "UserAccountStatus" NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "must_change_password" BOOLEAN NOT NULL DEFAULT false;
