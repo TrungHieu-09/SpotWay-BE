@@ -21,6 +21,10 @@ export function withConnectionTimeouts(
         "connect_timeout",
         env.DB_CONNECT_TIMEOUT_S ?? "30",
       );
+    // A shared Supabase pooler (session mode) allows ~15 clients for the whole team; Prisma's default pool
+    // (CPU x 2 + 1 per process) exhausts it and every query fails with EMAXCONNSESSION (HTTP 500).
+    if (!parsed.searchParams.has("connection_limit"))
+      parsed.searchParams.set("connection_limit", env.DB_POOL_SIZE ?? "4");
     if (!parsed.searchParams.has("pool_timeout"))
       parsed.searchParams.set("pool_timeout", env.DB_POOL_TIMEOUT_S ?? "30");
     return parsed.toString();
