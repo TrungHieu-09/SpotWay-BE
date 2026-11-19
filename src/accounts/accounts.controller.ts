@@ -37,6 +37,10 @@ export class TenantWorkspaceController {
   update(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateStaffDto) { return this.accounts.updateStaff(user, id, dto); }
   @Delete('users/:id') @ApiOperation({ summary: 'Delete a manager or store owner' }) @ApiEnvelopeResponse(200, 'Account deleted') @ApiStandardErrors()
   remove(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.accounts.deleteStaff(user, id); }
+  @Get('contracts') @ApiOperation({ summary: 'List service contracts signed between this Building Owner and Admin' }) @ApiEnvelopeResponse(200, 'Contracts returned') @ApiStandardErrors()
+  contracts(@CurrentUser() user: AuthUser) { return this.accounts.tenantContracts(user); }
+  @Post('contracts/:id/renew-request') @HttpCode(200) @ApiOperation({ summary: 'Submit a contract renewal request to Admin' }) @ApiEnvelopeResponse(200, 'Renewal requested') @ApiStandardErrors()
+  renewRequest(@Param('id') id: string, @Body() body: { note?: string }) { return this.accounts.requestContractRenewal(id, body?.note); }
 }
 
 @ApiTags('Tenants') @ApiBearerAuth('bearerAuth') @Controller('store-owners') @Roles(OWNER, MANAGER)
@@ -74,4 +78,12 @@ export class AdminController {
   reset(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ResetPasswordDto) { return this.accounts.adminResetPassword(id, dto.newPassword); }
   @Delete('users/:id') @ApiOperation({ summary: 'Delete an account' }) @ApiEnvelopeResponse(200, 'Account deleted') @ApiStandardErrors()
   remove(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.accounts.adminDeleteUser(user, id); }
+  @Get('contracts') @ApiOperation({ summary: 'List all service contracts between Admin and Building Owners' }) @ApiEnvelopeResponse(200, 'Contracts returned') @ApiStandardErrors()
+  listContracts() { return this.accounts.adminListContracts(); }
+  @Post('contracts') @ApiOperation({ summary: 'Create a new service contract with a Building Owner' }) @ApiEnvelopeResponse(201, 'Contract created') @ApiStandardErrors()
+  createContract(@Body() dto: Record<string, any>) { return this.accounts.adminCreateContract(dto); }
+  @Patch('contracts/:id') @ApiOperation({ summary: 'Update or renew a service contract' }) @ApiEnvelopeResponse(200, 'Contract updated') @ApiStandardErrors()
+  updateContract(@Param('id') id: string, @Body() dto: Record<string, any>) { return this.accounts.adminUpdateContract(id, dto); }
+  @Delete('contracts/:id') @ApiOperation({ summary: 'Delete a service contract' }) @ApiEnvelopeResponse(200, 'Contract deleted') @ApiStandardErrors()
+  deleteContract(@Param('id') id: string) { return this.accounts.adminDeleteContract(id); }
 }
