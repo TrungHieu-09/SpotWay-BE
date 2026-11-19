@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
@@ -6,10 +6,11 @@ import { StorageService } from '../floors/storage.service';
 import type { CreateStoreDto, UpdateStoreDto } from './stores.controller';
 import { STORE_WITH_BUILDING, serializeStore } from './store-serializer';
 import { assertManagerFloor } from '../common/manager-scope';
+import { ActivityService } from '../analytics/activity.service';
 
 @Injectable()
 export class StoresService {
-  constructor(private readonly prisma: PrismaService, private readonly storage: StorageService) {}
+  constructor(private readonly prisma: PrismaService, private readonly storage: StorageService, @Optional() private readonly activity?: ActivityService) {}
 
   async create(user: AuthUser, dto: CreateStoreDto) {
     const floor = await this.prisma.floor.findFirst({
@@ -46,7 +47,7 @@ export class StoresService {
     }
 
     try {
-      return serializeStore(await this.prisma.store.create({
+      const created = serializeStore(await this.prisma.store.create({
         include: STORE_WITH_BUILDING,
         data: {
           tenantId: floor.tenantId,
@@ -58,6 +59,8 @@ export class StoresService {
           images: dto.images ?? [],
         },
       }));
+      void this.activity?.record(user, created.buildingId, 'STORE_CREATED', `Thêm gian hàng "${created.name}"`, { storeId: created.id });
+      return created;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException({ code: 'STORE_OWNER_ALREADY_ASSIGNED', message: 'Store Owner already manages an active store' });
@@ -98,7 +101,10 @@ export class StoresService {
     if (dto.ownerId !== undefined) data.ownerId = dto.ownerId;
     if (dto.nodeId !== undefined) data.nodeId = dto.nodeId;
     try {
-      return serializeStore(await this.prisma.store.update({ where: { id }, data, include: STORE_WITH_BUILDING }));
+      const updated = serializeStore(await this.prisma.store.update({ where: { id }, data, include: STORE_WITH_BUILDING }));
+      const what = dto.status !== undefined ? (dto.status === 'ACTIVE' ? 'mở bán' : 'đóng') : 'cập nhật';
+      void this.activity?.record(user, updated.buildingId, 'STORE_UPDATED', `Gian hàng "${updated.name}": ${what}`, { storeId: id });
+      return updated;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException({ code: 'STORE_OWNER_ALREADY_ASSIGNED', message: 'Store Owner already manages an active store' });
       throw error;

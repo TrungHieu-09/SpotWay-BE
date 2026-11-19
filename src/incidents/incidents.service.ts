@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { BuildingStatus, TenantStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AuthUser } from '../common/auth.types';
 import { TenantAccessService } from '../common/tenant-access.service';
 import { PrismaService } from '../database/prisma.service';
+import { ActivityService } from '../analytics/activity.service';
 
 type ActiveIncident = { active: true; id: string; type: 'FIRE'; nodeIds: string[]; floorIds: string[]; message: string | null; startedAt: string };
 export type IncidentState = { active: false } | ActiveIncident;
@@ -19,7 +20,7 @@ export class IncidentsService {
   private readonly claims = new Map<string, Map<string, { exitNodeId: string; at: number }>>();
   private readonly knownNodes = new Map<string, Set<string>>();
   static readonly CLAIM_TTL_MS = 20_000;
-  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService) {}
+  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService, @Optional() private readonly activity?: ActivityService) {}
 
   private read(buildingId: string): IncidentState {
     return this.incidents.get(buildingId) ?? { active: false };
@@ -40,13 +41,20 @@ export class IncidentsService {
       startedAt: new Date().toISOString(),
     };
     this.incidents.set(buildingId, incident);
+    void this.activity?.record(user, buildingId, 'INCIDENT_STARTED', `Phát báo cháy (${incident.nodeIds.length} vị trí)${incident.message ? `: ${incident.message}` : ''}`, { nodeIds: incident.nodeIds, floorIds: incident.floorIds });
     return incident;
   }
 
   async clear(user: AuthUser, buildingId: string) {
     await this.access.building(user, buildingId);
+    const was = this.incidents.get(buildingId);
+    const evacuees = this.evacuees(buildingId);
     this.incidents.delete(buildingId);
     this.claims.delete(buildingId);
+    if (was) {
+      const seconds = Math.max(0, Math.round((Date.now() - new Date(was.startedAt).getTime()) / 1000));
+      void this.activity?.record(user, buildingId, 'INCIDENT_ENDED', `Kết thúc báo cháy sau ${Math.floor(seconds / 60)} phút ${seconds % 60} giây`, { durationSeconds: seconds, evacuees, startedAt: was.startedAt });
+    }
     return { active: false as const };
   }
 

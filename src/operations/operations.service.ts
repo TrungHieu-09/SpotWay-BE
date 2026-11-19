@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { BuildingStatus, TenantStatus } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
 import { TenantAccessService } from '../common/tenant-access.service';
 import { PrismaService } from '../database/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { ActivityService } from '../analytics/activity.service';
 
 export type Announcement = { id: number; text: string; at: string };
 export type Zone = { nodeId: string; name: string };
@@ -21,7 +22,7 @@ const EMPTY: OperationsState = { elevator: false, power: false, zone: null, anno
 export class OperationsService {
   private readonly states = new Map<string, OperationsState>();
   private seq = 0;
-  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService, private readonly analytics: AnalyticsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService, private readonly analytics: AnalyticsService, @Optional() private readonly activity?: ActivityService) {}
 
   private read(buildingId: string): OperationsState {
     return this.states.get(buildingId) ?? EMPTY;
@@ -34,7 +35,8 @@ export class OperationsService {
 
   async update(user: AuthUser, buildingId: string, patch: OperationsPatch) {
     await this.access.building(user, buildingId);
-    const next: OperationsState = { ...this.read(buildingId) };
+    const before = this.read(buildingId);
+    const next: OperationsState = { ...before };
     if (patch.elevator !== undefined) next.elevator = patch.elevator;
     if (patch.power !== undefined) next.power = patch.power;
     if (patch.zoneNodeId !== undefined) {
@@ -50,6 +52,12 @@ export class OperationsService {
       next.announcement = text ? { id: ++this.seq, text: text.slice(0, 300), at: new Date().toISOString() } : null;
     }
     next.updatedAt = new Date().toISOString();
+    const notes: string[] = [];
+    if (next.elevator !== before.elevator) notes.push(next.elevator ? 'báo thang máy ngừng hoạt động' : 'thang máy hoạt động lại');
+    if (next.power !== before.power) notes.push(next.power ? 'báo cúp điện' : 'có điện trở lại');
+    if (next.zone?.nodeId !== before.zone?.nodeId) notes.push(next.zone ? `đóng khu vực ${next.zone.name}` : `mở lại khu vực ${before.zone?.name ?? ''}`.trim());
+    if (next.announcement?.text !== before.announcement?.text) notes.push(next.announcement ? `thông báo: ${next.announcement.text}` : 'gỡ thông báo');
+    if (notes.length) void this.activity?.record(user, buildingId, 'OPERATIONS_CHANGED', notes.join('; ').replace(/^./, (c) => c.toUpperCase()));
     const quiet = !next.elevator && !next.power && !next.zone && !next.announcement;
     if (quiet) this.states.delete(buildingId);
     else this.states.set(buildingId, next);
@@ -58,7 +66,8 @@ export class OperationsService {
 
   async clear(user: AuthUser, buildingId: string) {
     await this.access.building(user, buildingId);
-    this.states.delete(buildingId);
+    const had = this.states.delete(buildingId);
+    if (had) void this.activity?.record(user, buildingId, 'OPERATIONS_CLEARED', 'Đưa tòa nhà về trạng thái bình thường');
     return EMPTY;
   }
 
@@ -66,6 +75,12 @@ export class OperationsService {
   async publicState(buildingId: string) {
     const building = await this.prisma.building.findFirst({ where: { id: buildingId, deletedAt: null, status: BuildingStatus.ACTIVE, tenant: { is: { deletedAt: null, archived: false, status: TenantStatus.ACTIVE } } }, select: { id: true } });
     return building ? this.read(buildingId) : EMPTY;
+  }
+
+  /** The who-did-what log of the building (newest first); `prefix` keeps one family such as INCIDENT. */
+  async activityLog(user: AuthUser, buildingId: string, limit = 50, prefix?: string) {
+    await this.access.building(user, buildingId);
+    return this.activity ? this.activity.list(buildingId, limit, prefix) : [];
   }
 
   /** Help requests sent from the guest app in the last `minutes`, newest first, with where the guest stood. */

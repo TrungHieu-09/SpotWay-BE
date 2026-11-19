@@ -30,6 +30,19 @@ export class MongoService implements OnModuleDestroy {
     return collection;
   }
 
+  private activityReady = false;
+  /** Who-did-what log of the buildings (see ActivityService). */
+  async activity(): Promise<Collection<{ _id: string; [key: string]: unknown }> | undefined> {
+    const db = await this.db();
+    if (!db) return undefined;
+    const collection = db.collection<{ _id: string; [key: string]: unknown }>('activity_logs');
+    if (!this.activityReady) {
+      await Promise.all([collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }), collection.createIndex({ buildingId: 1, at: -1 })]);
+      this.activityReady = true;
+    }
+    return collection;
+  }
+
   private async connect() {
     try {
       this.client = new MongoClient(process.env.MONGODB_URI!);

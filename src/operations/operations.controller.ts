@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
@@ -21,6 +21,8 @@ export class OperationsController {
   update(@CurrentUser() user: AuthUser, @Param('buildingId', ParseUUIDPipe) buildingId: string, @Body() dto: UpdateOperationsDto) { return this.operations.update(user, buildingId, dto); }
   @Delete() @Roles(...staff) @ApiOperation({ summary: 'Lift every closure and remove the notice' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Operations cleared') @ApiStandardErrors()
   clear(@CurrentUser() user: AuthUser, @Param('buildingId', ParseUUIDPipe) buildingId: string) { return this.operations.clear(user, buildingId); }
+  @Get('activity') @Roles(...staff) @ApiOperation({ summary: 'Who did what in this building (newest first); filter with ?kind=INCIDENT' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Activity returned') @ApiStandardErrors()
+  activity(@CurrentUser() user: AuthUser, @Param('buildingId', ParseUUIDPipe) buildingId: string, @Query('kind') kind?: string, @Query('limit') limit?: string) { return this.operations.activityLog(user, buildingId, Number(limit) || 50, kind); }
   @Get('help') @Roles(...staff) @ApiOperation({ summary: 'Help requests from guests of this building in the last 30 minutes' }) @ApiParam({ name: 'buildingId', format: 'uuid' }) @ApiEnvelopeResponse(200, 'Help requests returned') @ApiStandardErrors()
   help(@CurrentUser() user: AuthUser, @Param('buildingId', ParseUUIDPipe) buildingId: string) { return this.operations.helpRequests(user, buildingId); }
 }
