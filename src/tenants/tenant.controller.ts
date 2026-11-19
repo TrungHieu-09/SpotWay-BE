@@ -88,6 +88,106 @@ export class TenantController {
     };
   }
 
+  @Get('contracts')
+  @ApiOperation({ summary: 'List service contracts signed between this Building Owner and Admin' })
+  @ApiEnvelopeResponse(200, 'Tenant contracts returned successfully')
+  @ApiStandardErrors()
+  async getContracts(@CurrentUser() user: AuthUser) {
+    try {
+      await this.prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "contracts" (
+          "id" TEXT PRIMARY KEY,
+          "contract_code" TEXT NOT NULL,
+          "owner_id" TEXT,
+          "tenant_id" TEXT,
+          "customer_name" TEXT NOT NULL,
+          "owner_email" TEXT NOT NULL,
+          "representative" TEXT NOT NULL,
+          "workspace_domain" TEXT NOT NULL,
+          "start_date" TEXT NOT NULL,
+          "end_date" TEXT NOT NULL,
+          "annual_value" NUMERIC NOT NULL DEFAULT 24000,
+          "currency" TEXT NOT NULL DEFAULT 'USD',
+          "billing_label" TEXT,
+          "payment_status" TEXT NOT NULL DEFAULT 'paid',
+          "max_buildings" INTEGER NOT NULL DEFAULT 3,
+          "max_floors" INTEGER NOT NULL DEFAULT 15,
+          "page_count" INTEGER NOT NULL DEFAULT 3,
+          "scan_file_name" TEXT,
+          "scan_data_url" TEXT,
+          "notes" TEXT,
+          "renewal_requested" BOOLEAN NOT NULL DEFAULT FALSE,
+          "renewal_note" TEXT,
+          "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      const ownerRecord = await this.prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { email: true },
+      });
+      const ownerEmail = ownerRecord?.email ?? '';
+      const rows = await this.prisma.$queryRaw<any[]>`
+        SELECT * FROM "contracts"
+        WHERE "owner_id" = ${user.userId}
+           OR (${user.tenantId}::text IS NOT NULL AND "tenant_id" = ${user.tenantId})
+           OR LOWER("owner_email") = LOWER(${ownerEmail})
+        ORDER BY "created_at" DESC
+      `;
+      return rows.map((r) => ({
+        id: r.id,
+        contractCode: r.contract_code,
+        ownerId: r.owner_id,
+        tenantId: r.tenant_id,
+        customerName: r.customer_name,
+        ownerEmail: r.owner_email,
+        representative: r.representative,
+        workspaceDomain: r.workspace_domain,
+        startDate: r.start_date,
+        endDate: r.end_date,
+        annualValue: Number(r.annual_value ?? 0),
+        currency: r.currency || 'USD',
+        billingLabel: r.billing_label || null,
+        paymentStatus: r.payment_status || 'paid',
+        maxBuildings: Number(r.max_buildings ?? 3),
+        maxFloors: Number(r.max_floors ?? 15),
+        pageCount: Number(r.page_count ?? 3),
+        scanFileName: r.scan_file_name || null,
+        scanDataUrl: r.scan_data_url || null,
+        notes: r.notes || '',
+        renewalRequested: Boolean(r.renewal_requested),
+        renewalNote: r.renewal_note || null,
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  @Post('contracts/:id/renew-request')
+  @ApiOperation({ summary: 'Submit a contract renewal or quota upgrade request to Admin' })
+  @ApiEnvelopeResponse(200, 'Renewal request submitted')
+  @ApiStandardErrors()
+  async requestContractRenewal(
+    @Param('id') id: string,
+    @Body() body: { note?: string },
+  ) {
+    const cleanNote = (body?.note || 'Chủ tòa nhà yêu cầu gia hạn hợp đồng thêm 12 tháng.').trim();
+    try {
+      await this.prisma.$executeRaw`
+        UPDATE "contracts"
+        SET "renewal_requested" = TRUE,
+            "renewal_note" = ${cleanNote},
+            "updated_at" = NOW()
+        WHERE "id" = ${id}
+      `;
+    } catch {
+      // ignore if local contract
+    }
+    return { id, renewalRequested: true, renewalNote: cleanNote };
+  }
+
   @Get('areas')
   @ApiOperation({ summary: 'List buildings/areas in the current workspace for staff assignment' })
   @ApiEnvelopeResponse(200, 'Tenant areas returned successfully')

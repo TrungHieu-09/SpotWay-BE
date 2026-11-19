@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
@@ -13,7 +13,7 @@ import { AdminService } from './admin.service';
 @Controller('admin')
 @Roles(UserRole.ADMIN)
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(private readonly admin: AdminService) { }
 
   @Get('overview')
   @ApiOperation({ summary: 'Platform totals: accounts per role and buildings' })
@@ -53,5 +53,37 @@ export class AdminController {
   @ApiStandardErrors()
   remove(@CurrentUser() actor: AuthUser, @Param('id') id: string) {
     return this.admin.deleteUser(id, actor.userId);
+  }
+
+  @Get('contracts')
+  @ApiOperation({ summary: 'List all service contracts between Admin and Building Owners' })
+  @ApiEnvelopeResponse(200, 'Contracts returned successfully')
+  @ApiStandardErrors()
+  listContracts() {
+    return this.admin.listContracts();
+  }
+
+  @Post('contracts')
+  @ApiOperation({ summary: 'Create a new service contract with a Building Owner' })
+  @ApiEnvelopeResponse(201, 'Contract created successfully')
+  @ApiStandardErrors()
+  createContract(@Body() dto: Record<string, any>) {
+    return this.admin.createContract(dto);
+  }
+
+  @Patch('contracts/:id')
+  @ApiOperation({ summary: 'Update or renew a service contract' })
+  @ApiEnvelopeResponse(200, 'Contract updated successfully')
+  @ApiStandardErrors()
+  updateContract(@Param('id') id: string, @Body() dto: Record<string, any>) {
+    return this.admin.updateContract(id, dto);
+  }
+
+  @Delete('contracts/:id')
+  @ApiOperation({ summary: 'Delete a service contract' })
+  @ApiEnvelopeResponse(200, 'Contract deleted successfully')
+  @ApiStandardErrors()
+  deleteContract(@Param('id') id: string) {
+    return this.admin.deleteContract(id);
   }
 }
