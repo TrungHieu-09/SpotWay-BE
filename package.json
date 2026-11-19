@@ -20,7 +20,8 @@
 		"prisma:seed": "prisma db seed",
 		"demo:export": "ts-node prisma/demo-snapshot.ts export",
 		"demo:restore": "ts-node prisma/demo-snapshot.ts restore",
-		"demo:polish": "ts-node prisma/demo-snapshot.ts polish"
+		"demo:polish": "ts-node prisma/demo-snapshot.ts polish",
+		"demo:import": "ts-node prisma/import-building.ts"
 	},
 	"prisma": {
 		"seed": "ts-node prisma/seed.ts"

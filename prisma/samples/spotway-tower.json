@@ -1,0 +1,74 @@
+{
+  "tenant": "owner@demo-mall.local",
+  "building": { "name": "SpotWay Tower", "address": "12 Nguyễn Huệ, Quận 1, TP.HCM" },
+  "publish": true,
+  "copyImagesFrom": "SpotWay Plaza",
+  "floors": [
+    {
+      "number": 1,
+      "name": "Tầng 1",
+      "metersPerPixel": 0.0478,
+      "nodes": [
+        { "key": "lobby", "name": "Sảnh chính", "x": 330, "y": 620, "type": "DOOR" },
+        { "key": "j1", "name": "Ngã rẽ A", "x": 500, "y": 620, "type": "JUNCTION" },
+        { "key": "j2", "name": "Ngã rẽ B", "x": 700, "y": 620, "type": "JUNCTION" },
+        { "key": "j3", "name": "Ngã rẽ C", "x": 900, "y": 620, "type": "JUNCTION" },
+        { "key": "cafe", "name": "Cửa hàng cà phê", "x": 500, "y": 500 },
+        { "key": "shop", "name": "Cửa hàng thời trang", "x": 700, "y": 500 },
+        { "key": "books", "name": "Hiệu sách", "x": 900, "y": 500 },
+        { "key": "wc", "name": "Nhà vệ sinh", "x": 500, "y": 760 },
+        { "key": "lift", "name": "Thang máy", "x": 700, "y": 760, "type": "ELEVATOR" },
+        { "key": "stair", "name": "Thang bộ", "x": 900, "y": 760, "type": "STAIR" },
+        { "key": "exit", "name": "Lối thoát hiểm", "x": 340, "y": 780, "type": "EMERGENCY_EXIT" }
+      ],
+      "edges": [["lobby", "j1"], ["j1", "j2"], ["j2", "j3"], ["j1", "cafe"], ["j2", "shop"], ["j3", "books"], ["j1", "wc"], ["j2", "lift"], ["j3", "stair"], ["lobby", "exit"]],
+      "pois": [
+        { "node": "wc", "name": "Nhà vệ sinh", "category": "RESTROOM" },
+        { "node": "lift", "name": "Thang máy", "category": "ELEVATOR" },
+        { "node": "exit", "name": "Lối thoát hiểm", "category": "EXIT" },
+        { "node": "lobby", "name": "Quầy thông tin", "category": "INFO" }
+      ],
+      "stores": [
+        { "node": "cafe", "name": "Tower Coffee", "description": "Cà phê và bánh ngọt ngay sảnh.", "promo": "Mua 1 tặng 1 sau 18h" },
+        { "node": "shop", "name": "Tower Fashion", "description": "Thời trang công sở.", "promo": "Giảm 25% bộ sưu tập mới" },
+        { "node": "books", "name": "Tower Books", "description": "Sách và văn phòng phẩm.", "promo": "Tặng sổ tay khi mua từ 150K" }
+      ]
+    },
+    {
+      "number": 2,
+      "name": "Tầng 2",
+      "metersPerPixel": 0.0478,
+      "nodes": [
+        { "key": "j1", "name": "Ngã rẽ A", "x": 500, "y": 620, "type": "JUNCTION" },
+        { "key": "j2", "name": "Ngã rẽ B", "x": 700, "y": 620, "type": "JUNCTION" },
+        { "key": "j3", "name": "Ngã rẽ C", "x": 900, "y": 620, "type": "JUNCTION" },
+        { "key": "cinema", "name": "Rạp chiếu phim", "x": 500, "y": 500 },
+        { "key": "food", "name": "Khu ẩm thực", "x": 700, "y": 500 },
+        { "key": "phone", "name": "Cửa hàng điện thoại", "x": 900, "y": 500 },
+        { "key": "wc", "name": "Nhà vệ sinh", "x": 500, "y": 760 },
+        { "key": "lift", "name": "Thang máy", "x": 700, "y": 760, "type": "ELEVATOR" },
+        { "key": "stair", "name": "Thang bộ", "x": 900, "y": 760, "type": "STAIR" },
+        { "key": "exit", "name": "Lối thoát hiểm", "x": 340, "y": 780, "type": "EMERGENCY_EXIT" }
+      ],
+      "edges": [["j1", "j2"], ["j2", "j3"], ["j1", "cinema"], ["j2", "food"], ["j3", "phone"], ["j1", "wc"], ["j2", "lift"], ["j3", "stair"], ["j1", "exit"]],
+      "pois": [
+        { "node": "wc", "name": "Nhà vệ sinh", "category": "RESTROOM" },
+        { "node": "lift", "name": "Thang máy", "category": "ELEVATOR" },
+        { "node": "exit", "name": "Lối thoát hiểm", "category": "EXIT" }
+      ],
+      "stores": [
+        { "node": "cinema", "name": "Tower Cinema", "description": "Rạp chiếu phim 6 phòng.", "promo": "Combo bắp nước 59K" },
+        { "node": "food", "name": "Tower Food Court", "description": "Ẩm thực Việt và quốc tế.", "promo": "Giảm 15% suất ăn trưa" },
+        { "node": "phone", "name": "Tower Mobile", "description": "Điện thoại và phụ kiện.", "promo": "Trả góp 0%" }
+      ]
+    }
+  ],
+  "connectors": [
+    { "kind": "ELEVATOR", "name": "Thang máy chính", "stops": [{ "floor": 1, "node": "lift" }, { "floor": 2, "node": "lift" }] },
+    { "kind": "STAIR", "name": "Thang bộ", "stops": [{ "floor": 1, "node": "stair" }, { "floor": 2, "node": "stair" }] }
+  ],
+  "qr": [
+    { "token": "spotway-tower-lobby-0001", "label": "Sảnh tòa Tower", "floor": 1, "node": "lobby" },
+    { "token": "spotway-tower-upper-0002", "label": "Tầng 2 tòa Tower", "floor": 2, "node": "lift" }
+  ]
+}
