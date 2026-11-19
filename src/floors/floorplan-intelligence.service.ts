@@ -42,7 +42,7 @@ export class FloorplanIntelligenceService {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ imageUrl, floorId: floor.id }),
-        signal: AbortSignal.timeout(Number(process.env.FLOORPLAN_ANALYSIS_TIMEOUT_MS ?? 120000)),
+        signal: AbortSignal.timeout(Number(process.env.FLOORPLAN_ANALYSIS_TIMEOUT_MS ?? 300000)),
       });
     } catch {
       throw new ServiceUnavailableException({ code: 'FLOORPLAN_INTELLIGENCE_UNAVAILABLE', message: 'Floor-plan intelligence service did not respond' });
@@ -86,7 +86,7 @@ export class FloorplanIntelligenceService {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ imageUrl, floorId: floor.id }),
-        signal: AbortSignal.timeout(Number(process.env.FLOORPLAN_ANALYSIS_TIMEOUT_MS ?? 120000)),
+        signal: AbortSignal.timeout(Number(process.env.FLOORPLAN_ANALYSIS_TIMEOUT_MS ?? 300000)),
       });
     } catch {
       throw new ServiceUnavailableException({ code: 'FLOORPLAN_INTELLIGENCE_UNAVAILABLE', message: 'Navigation analysis service did not respond' });
