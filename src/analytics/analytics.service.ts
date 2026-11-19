@@ -35,6 +35,18 @@ export class AnalyticsService {
     }
     return processed;
   }
+  /** Help requests of one building in the last `minutes`, newest first (empty when Mongo is not configured: it is a bonus, never an error). */
+  async recentHelp(buildingId: string, minutes: number): Promise<{ id: string; kind: string; at: string; nodeId?: string }[]> {
+    const collection = await this.mongo.events();
+    if (!collection) return [];
+    const since = new Date(Date.now() - minutes * 60_000).toISOString();
+    const rows = await collection.find({ buildingId, eventType: 'HELP_REQUESTED', occurredAt: { $gte: since } }).sort({ occurredAt: -1 }).limit(50).toArray();
+    return rows.map((r) => {
+      const context = (r.context ?? {}) as Record<string, unknown>;
+      return { id: String(r._id), kind: String(context.helpKind ?? 'OTHER'), at: String(r.occurredAt), nodeId: context.nodeId as string | undefined };
+    });
+  }
+
   /** Usage of the last `days` days. Empty searches and anonymous targets are noise (the app lists everything on start), so they are left out. */
   async summary(tenantId?: string, days = 7) {
     const collection = await this.mongo.events();

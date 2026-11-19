@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { BuildingStatus, FloorPublishStatus, PromotionStatus, StoreStatus, TenantStatus, UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
+import { assertManagerFloor } from '../common/manager-scope';
 import { CreatePromotionDto, UpdatePromotionDto } from './promotions.dto';
 
 @Injectable()
@@ -11,8 +12,9 @@ export class PromotionsService {
     const store = await this.prisma.store.findFirst({ where: { id: storeId, deletedAt: null } });
     if (!store) throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store was not found' });
     if (user.role !== UserRole.ADMIN && (store.tenantId !== user.tenantId || (user.role === UserRole.STORE_OWNER && store.ownerId !== user.userId))) throw new ForbiddenException({ code: 'STORE_ACCESS_DENIED', message: 'Store access is denied' });
-    const allowedRoles: UserRole[] = [UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.STORE_OWNER];
+    const allowedRoles: UserRole[] = [UserRole.ADMIN, UserRole.BUILDING_OWNER, UserRole.BUILDING_MANAGER, UserRole.STORE_OWNER];
     if (!allowedRoles.includes(user.role)) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Promotion access is denied' });
+    await assertManagerFloor(this.prisma, user, store.floorId);
     return store;
   }
   private dates(dto: { startAt?: string; endAt?: string }, current?: { startAt: Date; endAt: Date }) {

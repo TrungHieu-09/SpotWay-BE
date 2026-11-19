@@ -5,6 +5,7 @@ import { PrismaService } from '../database/prisma.service';
 import { StorageService } from '../floors/storage.service';
 import type { CreateStoreDto, UpdateStoreDto } from './stores.controller';
 import { STORE_WITH_BUILDING, serializeStore } from './store-serializer';
+import { assertManagerFloor } from '../common/manager-scope';
 
 @Injectable()
 export class StoresService {
@@ -16,6 +17,7 @@ export class StoresService {
       select: { id: true, tenantId: true },
     });
     if (!floor) throw new NotFoundException({ code: 'FLOOR_NOT_FOUND', message: 'Floor was not found' });
+    await assertManagerFloor(this.prisma, user, dto.floorId);
     if (user.role !== UserRole.ADMIN && floor.tenantId !== user.tenantId) {
       throw new ForbiddenException({ code: 'TENANT_ACCESS_DENIED', message: 'Cross-tenant store creation is denied' });
     }
@@ -71,6 +73,7 @@ export class StoresService {
     if (user.role !== UserRole.ADMIN && (store.tenantId !== user.tenantId || (user.role === UserRole.STORE_OWNER && store.ownerId !== user.userId))) {
       throw new ForbiddenException({ code: 'STORE_ACCESS_DENIED', message: 'Store access is denied' });
     }
+    await assertManagerFloor(this.prisma, user, store.floorId);
     const managerFields = dto.ownerId !== undefined || dto.nodeId !== undefined || dto.status !== undefined;
     if (user.role === UserRole.STORE_OWNER && managerFields) {
       throw new ForbiddenException({ code: 'STORE_FIELD_FORBIDDEN', message: 'Only the building staff can change owner, node or status' });
@@ -104,11 +107,12 @@ export class StoresService {
 
   /** Signed URL to upload a logo / gallery image of a store; the client then saves the returned publicUrl on the store. */
   async createUploadUrl(user: AuthUser, id: string, filename: string) {
-    const store = await this.prisma.store.findFirst({ where: { id, deletedAt: null }, select: { id: true, tenantId: true, ownerId: true } });
+    const store = await this.prisma.store.findFirst({ where: { id, deletedAt: null }, select: { id: true, tenantId: true, ownerId: true, floorId: true } });
     if (!store) throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store was not found' });
     if (user.role !== UserRole.ADMIN && (store.tenantId !== user.tenantId || (user.role === UserRole.STORE_OWNER && store.ownerId !== user.userId))) {
       throw new ForbiddenException({ code: 'STORE_ACCESS_DENIED', message: 'Store access is denied' });
     }
+    await assertManagerFloor(this.prisma, user, store.floorId);
     const clean = filename.replace(/[^a-zA-Z0-9.-]/g, '_').slice(-80);
     return this.storage.createSignedUploadUrl(`stores/${store.id}/${Date.now()}-${clean}`);
   }

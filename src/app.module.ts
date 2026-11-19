@@ -8,6 +8,7 @@ import { DatabaseModule } from './database/database.module';
 import { FloorsModule } from './floors/floors.module';
 import { GraphModule } from './graph/graph.module';
 import { IncidentsModule } from './incidents/incidents.module';
+import { OperationsModule } from './operations/operations.module';
 import { HealthController } from './health.controller';
 import { NavigationModule } from './navigation/navigation.module';
 import { StoresModule } from './stores/stores.module';
@@ -16,7 +17,7 @@ import { QrModule } from './qr/qr.module';
 import { TenantsModule } from './tenants/tenants.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), DatabaseModule, AnalyticsModule, AuthModule, AccountsModule, TenantsModule, BuildingsModule, FloorsModule, StoresModule, PromotionsModule, GraphModule, IncidentsModule, QrModule, NavigationModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), DatabaseModule, AnalyticsModule, AuthModule, AccountsModule, TenantsModule, BuildingsModule, FloorsModule, StoresModule, PromotionsModule, GraphModule, IncidentsModule, OperationsModule, QrModule, NavigationModule],
   controllers: [HealthController],
 })
 export class AppModule {}
