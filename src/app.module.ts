@@ -24,6 +24,7 @@ import { TenantsModule } from "./tenants/tenants.module";
     AnalyticsModule,
     AuthModule,
     AccountsModule,
+    ContractsModule,
     TenantsModule,
     BuildingsModule,
     FloorsModule,
