@@ -44,6 +44,10 @@ export class CreateAdminUserDto {
   @ApiPropertyOptional({ description: 'Building Owner the account belongs to (required for manager / store owner)' }) @IsOptional() @IsUUID() ownerId?: string;
 }
 
+export class SetAccountStatusDto {
+  @ApiProperty({ enum: ACCOUNT_STATUSES }) @IsIn(ACCOUNT_STATUSES as unknown as string[]) status!: (typeof ACCOUNT_STATUSES)[number];
+}
+
 export class ResetPasswordDto {
   @ApiPropertyOptional({ minLength: 8, maxLength: 72 }) @IsOptional() @IsString() @MinLength(8) @MaxLength(72) newPassword?: string;
 }

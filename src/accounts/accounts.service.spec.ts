@@ -145,6 +145,30 @@ describe('AccountsService', () => {
       await expect(service.adminDeleteUser(admin, 'a2')).rejects.toBeInstanceOf(ForbiddenException);
     });
 
+    it('locks and unlocks an account and ends its sessions; never yourself or an admin', async () => {
+      const { prisma, service } = setup();
+      const admin: AuthUser = { userId: 'a1', role: UserRole.ADMIN, tenantId: null };
+      await expect(service.adminSetStatus(admin, 'a1', 'locked')).rejects.toMatchObject({ response: { code: 'CANNOT_LOCK_SELF' } });
+
+      prisma.user.findFirst.mockResolvedValue(baseUser({ id: 'a2', role: UserRole.ADMIN }));
+      await expect(service.adminSetStatus(admin, 'a2', 'locked')).rejects.toMatchObject({ response: { code: 'CANNOT_LOCK_ADMIN' } });
+
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.adminSetStatus(admin, 'ghost', 'locked')).rejects.toBeInstanceOf(NotFoundException);
+
+      const target = baseUser({ id: 'o1', role: UserRole.BUILDING_OWNER });
+      prisma.user.findFirst.mockResolvedValue(target);
+      prisma.user.update.mockResolvedValue({ ...target, status: UserAccountStatus.LOCKED });
+      await expect(service.adminSetStatus(admin, 'o1', 'locked')).resolves.toMatchObject({ id: 'o1', status: 'locked' });
+      expect(prisma.user.update.mock.calls[0][0].data.status).toBe(UserAccountStatus.LOCKED);
+      expect(prisma.refreshSession.updateMany).toHaveBeenCalled();
+
+      prisma.refreshSession.updateMany.mockClear();
+      prisma.user.update.mockResolvedValue({ ...target, status: UserAccountStatus.ACTIVE });
+      await expect(service.adminSetStatus(admin, 'o1', 'active')).resolves.toMatchObject({ status: 'active' });
+      expect(prisma.refreshSession.updateMany).not.toHaveBeenCalled();
+    });
+
     it('a manager account needs a Building Owner', async () => {
       const { service } = setup();
       await expect(service.adminCreateUser({ email: 'm@x.co', password: 'Password-12', role: 'building_manager' })).rejects.toBeInstanceOf(BadRequestException);

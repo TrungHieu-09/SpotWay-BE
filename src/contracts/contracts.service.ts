@@ -4,7 +4,7 @@ import { randomBytes, randomInt } from 'crypto';
 import { AuthUser } from '../common/auth.types';
 import { ContractAccessService } from '../common/contract-access.service';
 import { PrismaService } from '../database/prisma.service';
-import { ContractScanPageDto, CreateContractDto, MAX_RENEWAL_MONTHS, MAX_SCAN_TOTAL_CHARS, UpdateContractDto } from './contracts.dto';
+import { ContractScanPageDto, CreateContractDto, MAX_RENEWAL_MONTHS, MAX_SCAN_TOTAL_CHARS, TerminateContractDto, UpdateContractDto } from './contracts.dto';
 
 interface ContractRow {
   id: string;
@@ -33,6 +33,8 @@ interface ContractRow {
   renewal_note: string | null;
   renewal_amount: number | null;
   renewal_unit: string | null;
+  terminated_at: string | null;
+  termination_reason: string | null;
   created_at: Date | null;
   updated_at: Date | null;
 }
@@ -43,7 +45,7 @@ type ScanPage = Pick<ContractScanPageDto, 'fileName' | 'sizeText' | 'mime' | 'da
 const LIST_COLUMNS = Prisma.sql`
   "id", "contract_code", "owner_id", "tenant_id", "customer_name", "owner_email", "representative",
   "workspace_domain", "start_date", "end_date", "annual_value", "currency", "billing_label", "payment_status",
-  "max_buildings", "max_floors", "page_count", "scan_file_name", "notes", "renewal_requested", "renewal_note", "renewal_amount", "renewal_unit",
+  "max_buildings", "max_floors", "page_count", "scan_file_name", "notes", "renewal_requested", "renewal_note", "renewal_amount", "renewal_unit", "terminated_at", "termination_reason",
   "created_at", "updated_at",
   (COALESCE("scan_pages", '') NOT IN ('', '[]') OR "scan_data_url" IS NOT NULL) AS "has_scan"`;
 
@@ -90,12 +92,16 @@ export class ContractsService {
           "renewal_note" TEXT,
           "renewal_amount" INTEGER,
           "renewal_unit" TEXT,
+          "terminated_at" TEXT,
+          "termination_reason" TEXT,
           "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`);
       await this.prisma.$executeRawUnsafe('ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "scan_pages" TEXT');
       await this.prisma.$executeRawUnsafe('ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "renewal_amount" INTEGER');
       await this.prisma.$executeRawUnsafe('ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "renewal_unit" TEXT');
+      await this.prisma.$executeRawUnsafe('ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "terminated_at" TEXT');
+      await this.prisma.$executeRawUnsafe('ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "termination_reason" TEXT');
       // Short-lived column of an earlier iteration (months only); the amount + unit pair replaces it.
       await this.prisma.$executeRawUnsafe('ALTER TABLE "contracts" DROP COLUMN IF EXISTS "renewal_months"');
       // Demo rows that earlier builds seeded automatically: only contracts uploaded by an Admin are real.
@@ -157,6 +163,8 @@ export class ContractsService {
       renewalNote: row.renewal_note || null,
       renewalAmount: row.renewal_requested && row.renewal_amount ? Number(row.renewal_amount) : null,
       renewalUnit: row.renewal_requested && row.renewal_amount ? (row.renewal_unit === 'day' ? 'day' : 'month') : null,
+      terminatedAt: row.terminated_at || null,
+      terminationReason: row.termination_reason || null,
       createdAt: (row.created_at ?? new Date()).toISOString(),
       updatedAt: (row.updated_at ?? new Date()).toISOString(),
     };
@@ -307,6 +315,33 @@ export class ContractsService {
         "renewal_unit" = ${dto.renewalRequested === false ? null : cur.renewal_unit},
         "updated_at" = NOW()
       WHERE "id" = ${id}`;
+    this.access.invalidate();
+    return this.serialize(await this.findRow(id), true);
+  }
+
+  /** Ends the contract early without deleting it: from `terminatedAt` on the workspace is locked and the reason is kept. */
+  async terminate(id: string, dto: TerminateContractDto) {
+    await this.ensureTable();
+    const cur = await this.findRow(id);
+    if (!isRealDay(dto.terminatedAt)) throw new BadRequestException({ code: 'INVALID_DATES', message: 'Ngày kết thúc sớm không hợp lệ.' });
+    if (dto.terminatedAt <= cur.start_date) {
+      throw new BadRequestException({ code: 'INVALID_DATES', message: 'Ngày kết thúc sớm phải sau ngày bắt đầu hợp đồng.' });
+    }
+    if (dto.terminatedAt > cur.end_date) {
+      throw new BadRequestException({ code: 'INVALID_DATES', message: 'Ngày kết thúc sớm phải trước ngày kết thúc ban đầu của hợp đồng.' });
+    }
+    await this.prisma.$executeRaw`
+      UPDATE "contracts" SET "terminated_at" = ${dto.terminatedAt}, "termination_reason" = ${dto.reason.trim()}, "updated_at" = NOW()
+      WHERE "id" = ${id}`;
+    this.access.invalidate();
+    return this.serialize(await this.findRow(id), true);
+  }
+
+  async restore(id: string) {
+    await this.ensureTable();
+    await this.findRow(id);
+    await this.prisma.$executeRaw`
+      UPDATE "contracts" SET "terminated_at" = NULL, "termination_reason" = NULL, "updated_at" = NOW() WHERE "id" = ${id}`;
     this.access.invalidate();
     return this.serialize(await this.findRow(id), true);
   }

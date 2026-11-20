@@ -6,7 +6,7 @@ import { AllowExpiredContract } from '../common/allow-expired-contract.decorator
 import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
-import { CreateContractDto, RenewalRequestDto, UpdateContractDto } from './contracts.dto';
+import { CreateContractDto, RenewalRequestDto, TerminateContractDto, UpdateContractDto } from './contracts.dto';
 import { ContractsService } from './contracts.service';
 
 @ApiTags('Contracts') @ApiBearerAuth('bearerAuth') @Controller('admin/contracts') @Roles(UserRole.ADMIN)
@@ -24,6 +24,12 @@ export class AdminContractsController {
 
   @Patch(':id') @ApiOperation({ summary: 'Edit or renew a contract; sending scanPages replaces the stored scan' }) @ApiEnvelopeResponse(200, 'Contract updated') @ApiStandardErrors()
   update(@Param('id') id: string, @Body() dto: UpdateContractDto) { return this.contracts.update(id, dto); }
+
+  @Post(':id/terminate') @HttpCode(200) @ApiOperation({ summary: 'End a contract early: the workspace is locked from terminatedAt, the record stays' }) @ApiEnvelopeResponse(200, 'Contract terminated') @ApiStandardErrors()
+  terminate(@Param('id') id: string, @Body() dto: TerminateContractDto) { return this.contracts.terminate(id, dto); }
+
+  @Post(':id/restore') @HttpCode(200) @ApiOperation({ summary: 'Undo an early termination' }) @ApiEnvelopeResponse(200, 'Contract restored') @ApiStandardErrors()
+  restore(@Param('id') id: string) { return this.contracts.restore(id); }
 
   @Delete(':id') @ApiOperation({ summary: 'Delete a contract' }) @ApiEnvelopeResponse(200, 'Contract deleted') @ApiStandardErrors()
   remove(@Param('id') id: string) { return this.contracts.remove(id); }

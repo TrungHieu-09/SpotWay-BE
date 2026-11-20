@@ -78,6 +78,13 @@ export class UpdateContractDto extends PartialType(CreateContractDto) {
   @ApiPropertyOptional({ maxLength: 500, nullable: true }) @IsOptional() @IsString() @MaxLength(500) renewalNote?: string | null;
 }
 
+export class TerminateContractDto {
+  @ApiProperty({ example: '2026-11-25', description: 'First day without service; the contract can be used until the day before' })
+  @Matches(DAY, { message: 'terminatedAt must be YYYY-MM-DD' }) terminatedAt!: string;
+
+  @ApiProperty({ maxLength: 500 }) @IsString() @MinLength(1) @MaxLength(500) reason!: string;
+}
+
 export class RenewalRequestDto {
   @ApiProperty({ minimum: 1, description: 'How much time the owner would like to add (at most 60 months or 3650 days)' })
   @IsInt() @Min(1) @Max(3650) amount!: number;

@@ -296,6 +296,15 @@ export class AccountsService {
     return { ...this.toDto(updated), ...(newPassword ? {} : { temporaryPassword: password }) };
   }
 
+  /** Admin locks or unlocks any account. A locked account cannot sign in or refresh, and the guard stops its open sessions at once. */
+  async adminSetStatus(actor: AuthUser, id: string, status: 'active' | 'locked') {
+    if (actor.userId === id) throw new BadRequestException({ code: 'CANNOT_LOCK_SELF', message: 'You cannot lock your own account' });
+    const target = await this.prisma.user.findFirst({ where: { id, deletedAt: null, role: { not: UserRole.GUEST } } });
+    if (!target) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'Account was not found' });
+    if (target.role === UserRole.ADMIN) throw new ForbiddenException({ code: 'CANNOT_LOCK_ADMIN', message: 'Administrator accounts cannot be locked here' });
+    return this.applyPatch(target, { status });
+  }
+
   async adminDeleteUser(actor: AuthUser, id: string) {
     if (actor.userId === id) throw new BadRequestException({ code: 'CANNOT_DELETE_SELF', message: 'You cannot delete your own account' });
     const target = await this.prisma.user.findFirst({ where: { id, deletedAt: null } });

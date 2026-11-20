@@ -7,7 +7,7 @@ import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
 import { AccountsService } from './accounts.service';
-import { ChangePasswordDto, CreateAdminUserDto, CreateStaffDto, CreateStoreOwnerDto, ResetPasswordDto, UpdateProfileDto, UpdateStaffDto, UpdateStoreOwnerDto } from './accounts.dto';
+import { ChangePasswordDto, CreateAdminUserDto, CreateStaffDto, CreateStoreOwnerDto, ResetPasswordDto, SetAccountStatusDto, UpdateProfileDto, UpdateStaffDto, UpdateStoreOwnerDto } from './accounts.dto';
 
 const OWNER = UserRole.BUILDING_OWNER;
 const MANAGER = UserRole.BUILDING_MANAGER;
@@ -71,6 +71,8 @@ export class AdminController {
   users() { return this.accounts.adminUsers(); }
   @Post('users') @ApiOperation({ summary: 'Hand out an account (a Building Owner gets a new workspace)' }) @ApiEnvelopeResponse(201, 'Account created') @ApiStandardErrors()
   create(@Body() dto: CreateAdminUserDto) { return this.accounts.adminCreateUser(dto); }
+  @Patch('users/:id/status') @ApiOperation({ summary: 'Lock or unlock an account (sessions end at once; cannot target yourself or an admin)' }) @ApiEnvelopeResponse(200, 'Account updated') @ApiStandardErrors()
+  setStatus(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SetAccountStatusDto) { return this.accounts.adminSetStatus(user, id, dto.status); }
   @Post('users/:id/reset-password') @HttpCode(200) @ApiOperation({ summary: 'Reset a password (temporary one is generated when none is given)' }) @ApiEnvelopeResponse(200, 'Password reset') @ApiStandardErrors()
   reset(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ResetPasswordDto) { return this.accounts.adminResetPassword(id, dto.newPassword); }
   @Delete('users/:id') @ApiOperation({ summary: 'Delete an account' }) @ApiEnvelopeResponse(200, 'Account deleted') @ApiStandardErrors()

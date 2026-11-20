@@ -1,6 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { CreateContractDto, RenewalRequestDto, UpdateContractDto } from './contracts.dto';
+import { CreateContractDto, RenewalRequestDto, TerminateContractDto, UpdateContractDto } from './contracts.dto';
 import { ContractsService } from './contracts.service';
 
 const png = 'data:image/png;base64,iVBORw0KGgo=';
@@ -125,6 +125,35 @@ describe('ContractsService reads and writes', () => {
   });
 });
 
+describe('ContractsService.terminate / restore', () => {
+  it('ends a contract early, keeps the record and drops the cached answer', async () => {
+    const queryRaw = jest.fn().mockResolvedValue([row({ terminated_at: '2026-11-25', termination_reason: 'Vi phạm' })]);
+    const invalidate = jest.fn();
+    const { prisma } = build({ queryRaw });
+    const service = new ContractsService(prisma as never, { invalidate } as never);
+    const done = await service.terminate('cnt_1', { terminatedAt: '2026-11-25', reason: '  Vi phạm  ' });
+    const values = prisma.$executeRaw.mock.calls[0].slice(1);
+    expect(values).toEqual(expect.arrayContaining(['2026-11-25', 'Vi phạm']));
+    expect(invalidate).toHaveBeenCalled();
+    expect(done).toMatchObject({ terminatedAt: '2026-11-25', terminationReason: 'Vi phạm' });
+  });
+
+  it('only accepts a real date inside the life of the contract', async () => {
+    const { service, prisma } = build({ queryRaw: jest.fn().mockResolvedValue([row()]) });
+    await expect(service.terminate('cnt_1', { terminatedAt: '2026-02-31', reason: 'x' })).rejects.toMatchObject({ response: { code: 'INVALID_DATES' } });
+    await expect(service.terminate('cnt_1', { terminatedAt: '2026-01-01', reason: 'x' })).rejects.toMatchObject({ response: { code: 'INVALID_DATES' } });
+    await expect(service.terminate('cnt_1', { terminatedAt: '2027-01-01', reason: 'x' })).rejects.toMatchObject({ response: { code: 'INVALID_DATES' } });
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('restores a terminated contract and reports a missing one', async () => {
+    const found = build({ queryRaw: jest.fn().mockResolvedValue([row()]) });
+    await expect(found.service.restore('cnt_1')).resolves.toMatchObject({ terminatedAt: null, terminationReason: null });
+    expect(found.prisma.$executeRaw).toHaveBeenCalled();
+    await expect(build().service.restore('ghost')).rejects.toMatchObject({ response: { code: 'CONTRACT_NOT_FOUND' } });
+  });
+});
+
 describe('contract DTO validation', () => {
   const pipe = new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true });
   const check = (metatype: new () => object, value: object) => pipe.transform(value, { type: 'body', metatype });
@@ -165,6 +194,18 @@ describe('contract DTO validation', () => {
   it('refuses more than 60 months', async () => {
     const { service } = build();
     await expect(service.requestRenewal(owner, 'cnt_1', 61, 'month')).rejects.toMatchObject({ response: { code: 'INVALID_RENEWAL' } });
+  });
+
+  it.each([
+    ['no reason', { terminatedAt: '2026-11-25' }],
+    ['an empty reason', { terminatedAt: '2026-11-25', reason: '' }],
+    ['a bad date', { terminatedAt: '25/11/2026', reason: 'x' }],
+  ])('rejects a termination with %s', async (_label, payload) => {
+    await expect(check(TerminateContractDto, payload)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('accepts a termination with a date and a reason', async () => {
+    await expect(check(TerminateContractDto, { terminatedAt: '2026-11-25', reason: 'Vi phạm điều khoản' })).resolves.toBeInstanceOf(TerminateContractDto);
   });
 
   it('allows a partial update and clearing the renewal note', async () => {
