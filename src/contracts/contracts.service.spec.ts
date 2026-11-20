@@ -39,6 +39,7 @@ function build(opts: { owner?: object | null; queryRaw?: jest.Mock; executeRaw?:
       findFirst: jest.fn().mockResolvedValue(opts.owner === undefined ? { id: OWNER_ID, email: 'owner@demo.vn', tenantId: 't1', role: UserRole.BUILDING_OWNER } : opts.owner),
       findUnique: jest.fn().mockResolvedValue({ email: 'owner@demo.vn' }),
     },
+    tenant: { findUnique: jest.fn().mockResolvedValue({ name: 'Demo Mall' }) },
   };
   return { service: new ContractsService(prisma as never), prisma };
 }
@@ -65,6 +66,16 @@ describe('ContractsService.create', () => {
     await expect(build({ owner: null }).service.create(base)).rejects.toMatchObject({ response: { code: 'OWNER_NOT_FOUND' } });
     const dup = build({ queryRaw: jest.fn().mockResolvedValue([{ id: 'other' }]) });
     await expect(dup.service.create({ ...base, contractCode: 'HD-2026-001' })).rejects.toMatchObject({ response: { code: 'CONTRACT_CODE_EXISTS' } });
+  });
+
+  it('needs only the contract facts: the customer name comes from the owner workspace and quotas default to 0', async () => {
+    const queryRaw = jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([row()]);
+    const { service, prisma } = build({ queryRaw });
+    const { customerName: _c, representative: _r, workspaceDomain: _w, maxBuildings: _b, maxFloors: _f, ...minimal } = base;
+    await service.create({ ...minimal, contractCode: 'HD-2026-002' });
+    const values = prisma.$executeRaw.mock.calls[0].slice(1);
+    expect(values).toEqual(expect.arrayContaining(['Demo Mall', 0]));
+    expect(values).not.toContain(undefined);
   });
 
   it('links the contract to the owner account (tenant and email come from the account) and returns the stored scan', async () => {
@@ -127,7 +138,7 @@ describe('contract DTO validation', () => {
     ['bad currency', { ...base, currency: 'EUR' }],
     ['bad date shape', { ...base, startDate: '01/01/2026' }],
     ['negative value', { ...base, annualValue: -1 }],
-    ['zero buildings', { ...base, maxBuildings: 0 }],
+    ['negative quota', { ...base, maxBuildings: -1 }],
     ['owner is not a uuid', { ...base, ownerId: 'abc' }],
     ['file type not allowed', { ...base, scanPages: [{ ...page, mime: 'application/zip' }] }],
     ['too many pages', { ...base, scanPages: Array.from({ length: 11 }, () => page) }],

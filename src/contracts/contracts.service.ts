@@ -224,6 +224,8 @@ export class ContractsService {
     this.checkDates(dto.startDate, dto.endDate);
     this.checkPages(dto.scanPages);
     const owner = await this.owner(dto.ownerId);
+    const workspace = owner.tenantId ? await this.prisma.tenant.findUnique({ where: { id: owner.tenantId }, select: { name: true } }) : null;
+    const customerName = dto.customerName?.trim() || workspace?.name || owner.email;
     const code = dto.contractCode?.trim() || (await this.generateCode());
     await this.assertCodeFree(code);
 
@@ -235,9 +237,9 @@ export class ContractsService {
         "workspace_domain", "start_date", "end_date", "annual_value", "currency", "billing_label", "payment_status",
         "max_buildings", "max_floors", "page_count", "scan_file_name", "scan_pages", "notes", "updated_at"
       ) VALUES (
-        ${id}, ${code}, ${owner.id}, ${owner.tenantId}, ${dto.customerName.trim()}, ${owner.email}, ${dto.representative.trim()},
+        ${id}, ${code}, ${owner.id}, ${owner.tenantId}, ${customerName}, ${owner.email}, ${dto.representative?.trim() ?? ''},
         ${dto.workspaceDomain?.trim() ?? ''}, ${dto.startDate}, ${dto.endDate}, ${dto.annualValue}, ${dto.currency},
-        ${dto.billingLabel?.trim() || null}, ${dto.paymentStatus}, ${dto.maxBuildings}, ${dto.maxFloors},
+        ${dto.billingLabel?.trim() || null}, ${dto.paymentStatus}, ${dto.maxBuildings ?? 0}, ${dto.maxFloors ?? 0},
         ${dto.scanPages.length}, ${dto.scanPages[0].fileName}, ${pages}, ${dto.notes?.trim() ?? ''}, NOW()
       )`;
     return this.serialize(await this.findRow(id), true);

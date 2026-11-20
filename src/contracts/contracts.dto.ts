@@ -44,8 +44,9 @@ export class CreateContractDto {
   @ApiProperty({ format: 'uuid', description: 'Building Owner the contract is signed with; tenant and email come from this account' })
   @IsUUID() ownerId!: string;
 
-  @ApiProperty({ maxLength: 200 }) @IsString() @MinLength(1) @MaxLength(200) customerName!: string;
-  @ApiProperty({ maxLength: 200 }) @IsString() @MinLength(1) @MaxLength(200) representative!: string;
+  @ApiPropertyOptional({ maxLength: 200, description: 'Defaults to the name of the owner workspace' })
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(200) customerName?: string;
+  @ApiPropertyOptional({ maxLength: 200 }) @IsOptional() @IsString() @MaxLength(200) representative?: string;
   @ApiPropertyOptional({ maxLength: 200 }) @IsOptional() @IsString() @MaxLength(200) workspaceDomain?: string;
 
   @ApiProperty({ example: '2026-01-01' }) @Matches(DAY, { message: 'startDate must be YYYY-MM-DD' }) startDate!: string;
@@ -56,8 +57,10 @@ export class CreateContractDto {
   @ApiPropertyOptional({ maxLength: 100, nullable: true }) @IsOptional() @IsString() @MaxLength(100) billingLabel?: string | null;
   @ApiProperty({ enum: CONTRACT_PAYMENT_STATUSES }) @IsIn(CONTRACT_PAYMENT_STATUSES) paymentStatus!: (typeof CONTRACT_PAYMENT_STATUSES)[number];
 
-  @ApiProperty({ minimum: 1 }) @IsInt() @Min(1) @Max(100_000) maxBuildings!: number;
-  @ApiProperty({ minimum: 1 }) @IsInt() @Min(1) @Max(1_000_000) maxFloors!: number;
+  @ApiPropertyOptional({ minimum: 0, description: 'Limit written in the contract; 0 or omitted = not stated' })
+  @IsOptional() @IsInt() @Min(0) @Max(100_000) maxBuildings?: number;
+  @ApiPropertyOptional({ minimum: 0, description: 'Limit written in the contract; 0 or omitted = not stated' })
+  @IsOptional() @IsInt() @Min(0) @Max(1_000_000) maxFloors?: number;
 
   @ApiProperty({ type: [ContractScanPageDto], description: `1 to ${MAX_SCAN_PAGES} scanned pages (PDF or image)` })
   @IsArray() @ArrayMaxSize(MAX_SCAN_PAGES) @ValidateNested({ each: true }) @Type(() => ContractScanPageDto)
