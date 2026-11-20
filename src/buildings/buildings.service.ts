@@ -21,7 +21,7 @@ export class BuildingsService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
-        include: { _count: { select: { floors: true } } },
+        include: { _count: { select: { floors: { where: { deletedAt: null } } } } },
       }),
       this.prisma.building.count({ where }),
     ]);

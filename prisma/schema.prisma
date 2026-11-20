@@ -89,6 +89,8 @@ enum ConnectorKind {
 enum PoiCategory {
   RESTROOM
   ELEVATOR
+  STAIR
+  ESCALATOR
   EXIT
   INFO
   PARKING
@@ -335,6 +337,7 @@ model Poi {
   deletedAt          DateTime?   @map("deleted_at")
   floor              Floor       @relation(fields: [floorId], references: [id])
   node               Node        @relation(fields: [nodeId], references: [id])
+  store              Store?
 
   @@index([tenantId, floorId, deletedAt])
   @@index([nodeId])
@@ -346,6 +349,7 @@ model Store {
   tenantId    String      @map("tenant_id")
   floorId     String      @map("floor_id")
   nodeId      String?     @map("node_id")
+  poiId       String?     @unique @map("poi_id")
   ownerId     String?     @map("owner_id")
   name        String
   logoUrl     String?     @map("logo_url")
@@ -357,6 +361,7 @@ model Store {
   deletedAt   DateTime?   @map("deleted_at")
   floor       Floor       @relation(fields: [floorId], references: [id])
   node        Node?       @relation(fields: [nodeId], references: [id])
+  poi         Poi?        @relation(fields: [poiId], references: [id], onDelete: SetNull)
   owner       User?       @relation("StoreOwner", fields: [ownerId], references: [id])
   promotions  Promotion[]
 

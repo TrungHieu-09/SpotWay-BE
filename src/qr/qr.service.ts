@@ -1,12 +1,13 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { BuildingStatus, FloorPublishStatus, TenantStatus, UserRole } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { ActivityService } from '../analytics/activity.service';
 import { AuthUser } from '../common/auth.types'; import { TenantAccessService } from '../common/tenant-access.service'; import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
 export class QrService {
-  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService, private readonly analytics: AnalyticsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly access: TenantAccessService, private readonly analytics: AnalyticsService, @Optional() private readonly activity?: ActivityService) {}
   private hash(token: string) { return createHash('sha256').update(token).digest('hex'); }
   async create(user: AuthUser, nodeId: string, label: string) {
     const node = await this.prisma.node.findFirst({ where: { id: nodeId, deletedAt: null }, include: { floor: true } });
@@ -14,6 +15,7 @@ export class QrService {
     await this.access.building(user, node.floor.buildingId);
     const token = randomBytes(32).toString('base64url');
     const anchor = await this.prisma.qrAnchor.create({ data: { tenantId: node.tenantId, buildingId: node.floor.buildingId, floorId: node.floorId, nodeId, tokenHash: this.hash(token), label: label.trim() } });
+    void this.activity?.record(user, node.floor.buildingId, 'QR_CREATED', `Tạo mã QR "${anchor.label}"`, { nodeId });
     return { ...anchor, token };
   }
   async list(user: AuthUser, nodeId: string) { const node = await this.prisma.node.findFirst({ where: { id: nodeId, deletedAt: null }, include: { floor: true } }); if (!node || node.floor.deletedAt) throw new NotFoundException({ code: 'NODE_NOT_FOUND', message: 'Node was not found' }); await this.access.building(user, node.floor.buildingId); return this.prisma.qrAnchor.findMany({ where: { nodeId, deletedAt: null }, orderBy: { createdAt: 'desc' }, select: { id: true, label: true, nodeId: true, floorId: true, buildingId: true, createdAt: true } }); }
