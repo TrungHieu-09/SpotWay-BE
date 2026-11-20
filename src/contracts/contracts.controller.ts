@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@ne
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
+import { AllowExpiredContract } from '../common/allow-expired-contract.decorator';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
@@ -28,7 +29,7 @@ export class AdminContractsController {
   remove(@Param('id') id: string) { return this.contracts.remove(id); }
 }
 
-@ApiTags('Contracts') @ApiBearerAuth('bearerAuth') @Controller('tenant/contracts') @Roles(UserRole.BUILDING_OWNER)
+@ApiTags('Contracts') @ApiBearerAuth('bearerAuth') @Controller('tenant/contracts') @Roles(UserRole.BUILDING_OWNER) @AllowExpiredContract()
 export class TenantContractsController {
   constructor(private readonly contracts: ContractsService) {}
 
@@ -39,5 +40,5 @@ export class TenantContractsController {
   get(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.contracts.ownerGet(user, id); }
 
   @Post(':id/renew-request') @HttpCode(200) @ApiOperation({ summary: 'Ask the Admin to renew one of my contracts' }) @ApiEnvelopeResponse(200, 'Renewal requested') @ApiStandardErrors()
-  renew(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: RenewalRequestDto) { return this.contracts.requestRenewal(user, id, dto.note); }
+  renew(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: RenewalRequestDto) { return this.contracts.requestRenewal(user, id, dto.amount, dto.unit, dto.note); }
 }

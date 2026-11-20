@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, P
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
+import { AllowExpiredContract } from '../common/allow-expired-contract.decorator';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { ApiEnvelopeResponse, ApiStandardErrors } from '../common/swagger';
@@ -11,7 +12,7 @@ import { ChangePasswordDto, CreateAdminUserDto, CreateStaffDto, CreateStoreOwner
 const OWNER = UserRole.BUILDING_OWNER;
 const MANAGER = UserRole.BUILDING_MANAGER;
 
-@ApiTags('Authentication') @ApiBearerAuth('bearerAuth') @Controller('auth')
+@ApiTags('Authentication') @ApiBearerAuth('bearerAuth') @Controller('auth') @AllowExpiredContract()
 export class ProfileController {
   constructor(private readonly accounts: AccountsService) {}
   @Get('me') @ApiOperation({ summary: 'Get the authenticated user profile with its workspace' }) @ApiEnvelopeResponse(200, 'Profile returned') @ApiStandardErrors()

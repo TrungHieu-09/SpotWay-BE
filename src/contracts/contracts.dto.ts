@@ -23,6 +23,9 @@ export const CONTRACT_PAYMENT_STATUSES = ['paid', 'pending', 'custom'] as const;
 /** Scans are kept as base64 data URLs; only documents and plain images are accepted. */
 export const SCAN_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'] as const;
 
+export const RENEWAL_UNITS = ['day', 'month'] as const;
+export const MAX_RENEWAL_MONTHS = 60;
+
 export const MAX_SCAN_PAGES = 10;
 /** About 10 MB of binary once base64-encoded (the web client rejects larger files first). */
 export const MAX_SCAN_PAGE_CHARS = 14_000_000;
@@ -76,5 +79,11 @@ export class UpdateContractDto extends PartialType(CreateContractDto) {
 }
 
 export class RenewalRequestDto {
+  @ApiProperty({ minimum: 1, description: 'How much time the owner would like to add (at most 60 months or 3650 days)' })
+  @IsInt() @Min(1) @Max(3650) amount!: number;
+
+  @ApiProperty({ enum: RENEWAL_UNITS })
+  @IsIn(RENEWAL_UNITS) unit!: (typeof RENEWAL_UNITS)[number];
+
   @ApiPropertyOptional({ maxLength: 500 }) @IsOptional() @IsString() @MaxLength(500) note?: string;
 }

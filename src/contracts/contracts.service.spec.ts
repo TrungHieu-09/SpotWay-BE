@@ -1,6 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { CreateContractDto, UpdateContractDto } from './contracts.dto';
+import { CreateContractDto, RenewalRequestDto, UpdateContractDto } from './contracts.dto';
 import { ContractsService } from './contracts.service';
 
 const png = 'data:image/png;base64,iVBORw0KGgo=';
@@ -41,7 +41,7 @@ function build(opts: { owner?: object | null; queryRaw?: jest.Mock; executeRaw?:
     },
     tenant: { findUnique: jest.fn().mockResolvedValue({ name: 'Demo Mall' }) },
   };
-  return { service: new ContractsService(prisma as never), prisma };
+  return { service: new ContractsService(prisma as never, { invalidate: jest.fn() } as never), prisma };
 }
 
 const owner = { userId: OWNER_ID, role: UserRole.BUILDING_OWNER, tenantId: 't1' };
@@ -115,10 +115,10 @@ describe('ContractsService reads and writes', () => {
   it('only lets an owner open or renew a contract that is theirs', async () => {
     const none = build({ queryRaw: jest.fn().mockResolvedValue([]) });
     await expect(none.service.ownerGet(owner, 'cnt_other')).rejects.toMatchObject({ response: { code: 'CONTRACT_NOT_FOUND' } });
-    await expect(none.service.requestRenewal(owner, 'cnt_other', 'please')).rejects.toMatchObject({ response: { code: 'CONTRACT_NOT_FOUND' } });
+    await expect(none.service.requestRenewal(owner, 'cnt_other', 6, 'month', 'please')).rejects.toMatchObject({ response: { code: 'CONTRACT_NOT_FOUND' } });
 
     const mine = build({ queryRaw: jest.fn().mockResolvedValue([{ id: 'cnt_1' }]) });
-    await expect(mine.service.requestRenewal(owner, 'cnt_1', '  Gia hạn 12 tháng  ')).resolves.toEqual({ id: 'cnt_1', renewalRequested: true, renewalNote: 'Gia hạn 12 tháng' });
+    await expect(mine.service.requestRenewal(owner, 'cnt_1', 45, 'day', '  Cần thêm hạn mức  ')).resolves.toEqual({ id: 'cnt_1', renewalRequested: true, renewalAmount: 45, renewalUnit: 'day', renewalNote: 'Cần thêm hạn mức' });
     const sql = mine.prisma.$queryRaw.mock.calls[0][0].sql as string;
     expect(sql).toMatch(/"owner_id" =/);
     expect(sql).toMatch(/RETURNING "id"/);
@@ -144,6 +144,27 @@ describe('contract DTO validation', () => {
     ['too many pages', { ...base, scanPages: Array.from({ length: 11 }, () => page) }],
   ])('rejects %s', async (_label, payload) => {
     await expect(check(CreateContractDto, payload)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it.each([
+    ['nothing', {}],
+    ['no unit', { amount: 3 }],
+    ['an unknown unit', { amount: 3, unit: 'year' }],
+    ['zero', { amount: 0, unit: 'day' }],
+    ['more than 3650', { amount: 3651, unit: 'day' }],
+    ['a fraction', { amount: 1.5, unit: 'month' }],
+  ])('rejects a renewal request with %s', async (_label, payload) => {
+    await expect(check(RenewalRequestDto, payload)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('accepts a renewal request in days or months, with an optional note', async () => {
+    await expect(check(RenewalRequestDto, { amount: 45, unit: 'day' })).resolves.toBeInstanceOf(RenewalRequestDto);
+    await expect(check(RenewalRequestDto, { amount: 6, unit: 'month', note: 'Cần thêm hạn mức' })).resolves.toBeInstanceOf(RenewalRequestDto);
+  });
+
+  it('refuses more than 60 months', async () => {
+    const { service } = build();
+    await expect(service.requestRenewal(owner, 'cnt_1', 61, 'month')).rejects.toMatchObject({ response: { code: 'INVALID_RENEWAL' } });
   });
 
   it('allows a partial update and clearing the renewal note', async () => {
