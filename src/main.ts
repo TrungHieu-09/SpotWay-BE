@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
@@ -7,7 +8,10 @@ import { ApiExceptionFilter } from './common/api-exception.filter';
 import { ResponseInterceptor } from './common/response.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Contract scans are sent as base64 data URLs, which exceed Express' default 100kb JSON limit.
+  app.useBodyParser('json', { limit: '40mb' });
+  app.useBodyParser('urlencoded', { limit: '40mb', extended: true });
   // Lets Ctrl+C / SIGTERM run PrismaService.onModuleDestroy so DB connections are released instead of lingering.
   app.enableShutdownHooks();
   const isProduction = process.env.NODE_ENV === 'production';
