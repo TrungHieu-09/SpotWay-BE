@@ -42,7 +42,7 @@ describe('FloorCalibrationService', () => {
 describe('PoiService', () => {
   const nodes = [{ id: 'near', x: 100, y: 100 }, { id: 'far', x: 900, y: 900 }];
   function build(floorOverride: Partial<typeof floor> = {}, createdNode: object | null = null) {
-    const tx = baseTx({ poi: { create: jest.fn(async ({ data }) => ({ id: 'p1', ...data })), update: jest.fn(async ({ data }) => ({ id: 'p1', ...data })) } });
+    const tx = baseTx({ poi: { create: jest.fn(async ({ data }) => ({ id: 'p1', ...data })), update: jest.fn(async ({ data }) => ({ id: 'p1', ...data })) }, store: { updateMany: jest.fn() } });
     const prisma = {
       floor: { findFirst: jest.fn().mockResolvedValue({ ...floor, ...floorOverride }) },
       node: { findMany: jest.fn().mockResolvedValue(nodes), findFirst: jest.fn().mockResolvedValue(createdNode) },
@@ -88,6 +88,7 @@ describe('PoiService', () => {
     prisma.poi.findFirst.mockResolvedValue(existing);
     await service.update(user, 'p1', { name: 'Renamed' });
     expect(tx.poi.update.mock.calls[0][0].data).not.toHaveProperty('nodeId');
+    expect(tx.store.updateMany).toHaveBeenCalledWith({ where: { poiId: 'p1', deletedAt: null }, data: { name: 'Renamed' } });
     await service.update(user, 'p1', { x: 880, y: 890 });
     expect(tx.poi.update.mock.calls[1][0].data).toMatchObject({ nodeId: 'far', x: 880, y: 890 });
   });

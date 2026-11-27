@@ -7,6 +7,7 @@ import type { CreateStoreDto, UpdateStoreDto } from './stores.controller';
 import { STORE_WITH_BUILDING, serializeStore } from './store-serializer';
 import { assertManagerFloor } from '../common/manager-scope';
 import { ActivityService } from '../analytics/activity.service';
+import { bumpGraphVersion } from '../graph/application/graph-support';
 
 @Injectable()
 export class StoresService {
@@ -101,7 +102,14 @@ export class StoresService {
     if (dto.ownerId !== undefined) data.ownerId = dto.ownerId;
     if (dto.nodeId !== undefined) data.nodeId = dto.nodeId;
     try {
-      const updated = serializeStore(await this.prisma.store.update({ where: { id }, data, include: STORE_WITH_BUILDING }));
+      const updated = serializeStore(await this.prisma.$transaction(async (tx) => {
+        const result = await tx.store.update({ where: { id }, data, include: STORE_WITH_BUILDING });
+        if (store.poiId && dto.name !== undefined) {
+          const changed = await tx.poi.updateMany({ where: { id: store.poiId, deletedAt: null }, data: { name: dto.name.trim() } });
+          if (changed.count) await bumpGraphVersion(tx, store.floorId);
+        }
+        return result;
+      }));
       const what = dto.status !== undefined ? (dto.status === 'ACTIVE' ? 'mở bán' : 'đóng') : 'cập nhật';
       void this.activity?.record(user, updated.buildingId, 'STORE_UPDATED', `Gian hàng "${updated.name}": ${what}`, { storeId: id });
       return updated;

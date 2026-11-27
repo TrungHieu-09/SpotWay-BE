@@ -59,7 +59,11 @@ export class PoiService {
     const { maxSnapMeters: _ignored, nodeId: _node, ...fields } = dto;
     return this.prisma.$transaction(async (tx) => {
       await bumpGraphVersion(tx, poi.floorId);
-      return tx.poi.update({ where: { id }, data: { ...fields, name: dto.name?.trim(), icon: dto.icon?.trim(), ...(anchor ? { nodeId: anchor.nodeId, snapDistanceMeters: anchor.distanceMeters, x, y } : {}) } });
+      const updated = await tx.poi.update({ where: { id }, data: { ...fields, name: dto.name?.trim(), icon: dto.icon?.trim(), ...(anchor ? { nodeId: anchor.nodeId, snapDistanceMeters: anchor.distanceMeters, x, y } : {}) } });
+      if (dto.name !== undefined || anchor) {
+        await tx.store.updateMany({ where: { poiId: id, deletedAt: null }, data: { ...(dto.name !== undefined ? { name: dto.name.trim() } : {}), ...(anchor ? { nodeId: anchor.nodeId } : {}) } });
+      }
+      return updated;
     });
   }
 

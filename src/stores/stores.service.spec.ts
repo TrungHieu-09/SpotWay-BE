@@ -6,6 +6,20 @@ const user = { userId: 'owner-1', role: UserRole.BUILDING_OWNER, tenantId: 'tena
 const floor = { id: 'floor-1', tenantId: 'tenant-1' };
 
 describe('StoresService', () => {
+  it('renames the linked POI in the same transaction as the store', async () => {
+    const tx = {
+      store: { update: jest.fn().mockResolvedValue({ id: 'store-1', name: 'Nhà hàng 123' }) },
+      poi: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      floor: { update: jest.fn().mockResolvedValue({ graphVersion: 2 }) },
+    };
+    const prisma = {
+      store: { findFirst: jest.fn().mockResolvedValue({ id: 'store-1', tenantId: 'tenant-1', floorId: 'floor-1', poiId: 'poi-1' }) },
+      $transaction: jest.fn(async (fn) => fn(tx)),
+    } as any;
+    await new StoresService(prisma, {} as never).update(user, 'store-1', { name: ' Nhà hàng 123 ' });
+    expect(tx.poi.updateMany).toHaveBeenCalledWith({ where: { id: 'poi-1', deletedAt: null }, data: { name: 'Nhà hàng 123' } });
+    expect(tx.floor.update).toHaveBeenCalled();
+  });
   it('rejects a node from another floor', async () => {
     const prisma = {
       floor: { findFirst: jest.fn().mockResolvedValue(floor) },
