@@ -14,6 +14,7 @@ export class BuildingsService {
       deletedAt: null,
       ...(user.role === UserRole.ADMIN ? {} : { tenantId: user.tenantId! }),
       ...(user.role === UserRole.BUILDING_MANAGER ? { assignments: { some: { userId: user.userId } } } : {}),
+      ...(user.role === UserRole.STORE_OWNER ? { floors: { some: { deletedAt: null, stores: { some: { ownerId: user.userId, deletedAt: null } } } } } : {}),
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.building.findMany({
