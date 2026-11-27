@@ -28,8 +28,8 @@ export class GraphValidatorService {
   }
 
   async report(floorId: string): Promise<GraphValidationReport> {
-    const floor = await this.prisma.floor.findFirstOrThrow({ where: { id: floorId, deletedAt: null }, select: { id: true, metersPerPixel: true, graphVersion: true } });
-    const [nodes, edges, stores, pois, qrAnchors, connectors, links] = await this.prisma.$transaction([
+    const floor = await this.prisma.floor.findFirstOrThrow({ where: { id: floorId, deletedAt: null }, select: { id: true, buildingId: true, metersPerPixel: true, graphVersion: true } });
+    const [nodes, edges, stores, pois, qrAnchors, connectors, links, floorCount] = await this.prisma.$transaction([
       this.prisma.node.findMany({ where: { floorId, deletedAt: null }, select: { id: true, x: true, y: true, type: true } }),
       this.prisma.edge.findMany({ where: { floorId, deletedAt: null }, select: { id: true, fromNodeId: true, toNodeId: true, weightMeters: true } }),
       this.prisma.store.findMany({ where: { floorId, deletedAt: null, status: StoreStatus.ACTIVE }, select: { id: true, nodeId: true } }),
@@ -37,12 +37,14 @@ export class GraphValidatorService {
       this.prisma.qrAnchor.findMany({ where: { floorId, deletedAt: null }, select: { id: true, nodeId: true } }),
       this.prisma.connector.findMany({ where: { deletedAt: null, stops: { some: { floorId } } }, select: { id: true, kind: true, stops: { select: { floorId: true, nodeId: true } } } }),
       this.prisma.elevatorLink.findMany({ where: { deletedAt: null, OR: [{ fromNode: { floorId } }, { toNode: { floorId } }] }, select: { nodeIdFrom: true, nodeIdTo: true } }),
+      this.prisma.floor.count({ where: { buildingId: floor.buildingId, deletedAt: null } }),
     ]);
     const issues = validateFloorGraph({
       metersPerPixel: floor.metersPerPixel,
       nodes, edges, stores, pois, qrAnchors,
       connectors: connectors.map((connector) => ({ id: connector.id, kind: connector.kind, stopFloorIds: connector.stops.map((stop) => stop.floorId), floorNodeIds: connector.stops.filter((stop) => stop.floorId === floorId).map((stop) => stop.nodeId) })),
       legacyLinkedNodeIds: links.flatMap((link) => [link.nodeIdFrom, link.nodeIdTo]),
+      singleFloorBuilding: floorCount === 1,
     });
     return { floorId, graphVersion: floor.graphVersion, valid: !issues.some((issue) => issue.severity === 'ERROR'), issues };
   }

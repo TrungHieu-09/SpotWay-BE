@@ -15,6 +15,7 @@ export type FloorGraphInput = {
   connectors: Array<{ id: string; kind: ConnectorKind; stopFloorIds: string[]; floorNodeIds: string[] }>;
   /** Node ids of this floor that sit on a live legacy ElevatorLink. */
   legacyLinkedNodeIds: string[];
+  singleFloorBuilding?: boolean;
 };
 
 const WEIGHT_TOLERANCE = 0.01;
@@ -56,7 +57,7 @@ export function validateFloorGraph(input: FloorGraphInput): GraphIssue[] {
   const connectedNodes = new Set([...input.legacyLinkedNodeIds, ...input.connectors.flatMap((connector) => connector.floorNodeIds)]);
   const unlinked = (type: NodeType) => input.nodes.filter((node) => node.type === type && !connectedNodes.has(node.id)).map((node) => node.id);
   const unlinkedElevators = unlinked(NodeType.ELEVATOR);
-  if (unlinkedElevators.length) issues.push(error('UNLINKED_ELEVATOR_NODE', 'Every elevator node must have a vertical link before publishing', unlinkedElevators));
+  if (unlinkedElevators.length && !input.singleFloorBuilding) issues.push(error('UNLINKED_ELEVATOR_NODE', 'Every elevator node must have a vertical link before publishing', unlinkedElevators));
   const unlinkedStairs = [...unlinked(NodeType.STAIR), ...unlinked(NodeType.ESCALATOR)];
   if (unlinkedStairs.length) issues.push(warning('UNLINKED_STAIR_NODE', 'Stair/escalator nodes without a connector lead nowhere', unlinkedStairs));
 

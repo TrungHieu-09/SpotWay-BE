@@ -5,9 +5,9 @@ import { GraphValidatorService } from './graph-validator.service';
 const user = { userId: 'u', role: UserRole.BUILDING_OWNER, tenantId: 't' };
 const floor = { id: 'floor-1', buildingId: 'b', deletedAt: null, metersPerPixel: 0.1 as number | null, graphVersion: 7 };
 
-function build(over: { floor?: Partial<typeof floor>; nodes?: unknown[]; edges?: unknown[]; stores?: unknown[]; connectors?: unknown[]; links?: unknown[] } = {}) {
+function build(over: { floor?: Partial<typeof floor>; nodes?: unknown[]; edges?: unknown[]; stores?: unknown[]; connectors?: unknown[]; links?: unknown[]; floorCount?: number } = {}) {
   const prisma = {
-    floor: { findFirst: jest.fn().mockResolvedValue(floor), findFirstOrThrow: jest.fn().mockResolvedValue({ ...floor, ...over.floor }) },
+    floor: { findFirst: jest.fn().mockResolvedValue(floor), findFirstOrThrow: jest.fn().mockResolvedValue({ ...floor, ...over.floor }), count: jest.fn().mockResolvedValue(over.floorCount ?? 2) },
     node: { findMany: jest.fn().mockResolvedValue(over.nodes ?? [{ id: 'a', x: 0, y: 0, type: NodeType.NORMAL }, { id: 'exit', x: 100, y: 0, type: NodeType.EXIT }]) },
     edge: { findMany: jest.fn().mockResolvedValue(over.edges ?? [{ id: 'e', fromNodeId: 'a', toNodeId: 'exit', weightMeters: 10 }]) },
     store: { findMany: jest.fn().mockResolvedValue(over.stores ?? [{ id: 's', nodeId: 'a' }]) },
@@ -36,6 +36,11 @@ describe('GraphValidatorService', () => {
     expect(error).toBeInstanceOf(BadRequestException);
     expect(error.getResponse()).toMatchObject({ code: 'UNLINKED_ELEVATOR_NODE', nodeIds: ['lift'] });
     expect(error.getResponse().issues).toEqual(expect.any(Array));
+  });
+
+  it('allows an unlinked elevator when the building has only one active floor', async () => {
+    const service = build({ floorCount: 1, nodes: [{ id: 'a', x: 0, y: 0, type: NodeType.NORMAL }, { id: 'lift', x: 5, y: 5, type: NodeType.ELEVATOR }, { id: 'exit', x: 100, y: 0, type: NodeType.EXIT }], edges: [{ id: 'e1', fromNodeId: 'a', toNodeId: 'lift', weightMeters: 0.7071 }, { id: 'e2', fromNodeId: 'a', toNodeId: 'exit', weightMeters: 10 }] });
+    expect((await service.assertFloorCanPublish(floor.id)).valid).toBe(true);
   });
 
   it('does not block on warnings alone', async () => {
