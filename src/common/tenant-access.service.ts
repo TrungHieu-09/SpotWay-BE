@@ -11,6 +11,11 @@ export class TenantAccessService {
     if (user.role === UserRole.ADMIN) return building;
     if (building.tenantId !== user.tenantId) throw new ForbiddenException({ code: 'TENANT_ACCESS_DENIED', message: 'Cross-tenant access is denied' });
     if (user.role === UserRole.BUILDING_MANAGER) { const assigned = await this.prisma.staffAssignment.findUnique({ where: { userId_buildingId: { userId: user.userId, buildingId } } }); if (!assigned) throw new ForbiddenException({ code: 'BUILDING_ACCESS_DENIED', message: 'Manager is not assigned to this building' }); }
+    if (user.role === UserRole.STORE_OWNER) {
+      const owns = await this.prisma.store.findFirst({ where: { ownerId: user.userId, deletedAt: null, floor: { buildingId } }, select: { id: true } });
+      if (!owns) throw new ForbiddenException({ code: 'BUILDING_ACCESS_DENIED', message: 'You have no store in this building' });
+      return building;
+    }
     if (user.role !== UserRole.BUILDING_OWNER && user.role !== UserRole.BUILDING_MANAGER) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Building access is denied' });
     return building;
   }
