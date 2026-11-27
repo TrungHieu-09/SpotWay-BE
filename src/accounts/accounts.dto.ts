@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export const STAFF_ROLES = ['building_manager', 'store_owner'] as const;
-export const ADMIN_ASSIGNABLE_ROLES = ['building_owner', 'building_manager', 'store_owner'] as const;
+export const ADMIN_ASSIGNABLE_ROLES = ['building_owner', 'building_manager'] as const;
 export const ACCOUNT_STATUSES = ['active', 'locked'] as const;
 
 export class UpdateProfileDto {

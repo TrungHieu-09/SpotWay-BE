@@ -5,11 +5,15 @@ import { randomBytes } from 'crypto';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../database/prisma.service';
 import { STORE_WITH_BUILDING, serializeStore } from '../stores/store-serializer';
-import { ADMIN_ASSIGNABLE_ROLES, CreateAdminUserDto, CreateStaffDto } from './accounts.dto';
+import { ADMIN_ASSIGNABLE_ROLES, CreateAdminUserDto, CreateStaffDto, STAFF_ROLES as STAFF_ROLE_NAMES } from './accounts.dto';
 
 const BCRYPT_ROUNDS = 12;
 const ROLE_OF: Record<(typeof ADMIN_ASSIGNABLE_ROLES)[number], UserRole> = {
   building_owner: UserRole.BUILDING_OWNER,
+  building_manager: UserRole.BUILDING_MANAGER,
+};
+/** Roles a Building Owner can create for their own workspace (the admin cannot hand out `store_owner`). */
+const STAFF_ROLE_OF: Record<(typeof STAFF_ROLE_NAMES)[number], UserRole> = {
   building_manager: UserRole.BUILDING_MANAGER,
   store_owner: UserRole.STORE_OWNER,
 };
@@ -174,7 +178,7 @@ export class AccountsService {
   async createStaff(user: AuthUser, dto: CreateStaffDto) {
     const tenantId = this.requireTenant(user);
     const temporaryPassword = dto.password ?? this.generatePassword();
-    const created = await this.createUser({ email: dto.email.trim().toLowerCase(), name: dto.name.trim(), role: ROLE_OF[dto.role], tenantId }, temporaryPassword);
+    const created = await this.createUser({ email: dto.email.trim().toLowerCase(), name: dto.name.trim(), role: STAFF_ROLE_OF[dto.role], tenantId }, temporaryPassword);
     if (created.role === UserRole.BUILDING_MANAGER && dto.areaIds?.length) await this.syncAssignments(tenantId, created.id, dto.areaIds);
     return { ...this.toDto(created), areaIds: created.role === UserRole.BUILDING_MANAGER ? await this.assignedBuildings(created.id) : [], temporaryPassword };
   }
